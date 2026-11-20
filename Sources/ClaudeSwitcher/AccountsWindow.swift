@@ -24,7 +24,7 @@ struct AccountsWindow: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Remove", role: .destructive) { model.remove(p) }
+                        Button("Remove", role: .destructive) { model.remove(p) }.disabled(model.isBusy)
                     }
                 }
             }
@@ -44,6 +44,7 @@ struct AccountsWindow: View {
             }
             Section("Settings") {
                 Toggle("Share all sessions automatically", isOn: Binding(get: { model.state.shareAll }, set: { model.setShareAll($0) }))
+                    .disabled(model.isBusy)
             }
         }
         .formStyle(.grouped)

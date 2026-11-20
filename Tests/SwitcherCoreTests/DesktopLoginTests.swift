@@ -77,4 +77,24 @@ import Testing
         try login.capture(into: "A")
         #expect(!fm.fileExists(atPath: vault.appendingPathComponent("A/desktop/IndexedDB").path))
     }
+
+    @Test func captureFailureKeepsPreviousSnapshot() throws {
+        let (support, vault, login) = try setup()
+        try login.capture(into: "A")
+        let unreadable = support.appendingPathComponent("Local Storage")
+        try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadable.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: unreadable.path) }
+        #expect(throws: (any Error).self) { try login.capture(into: "A") }
+        #expect(try read(vault.appendingPathComponent("A/desktop/Cookies")) == "cookies-A")
+        #expect(try read(vault.appendingPathComponent("A/desktop/Local Storage/leveldb")) == "ls-A")
+    }
+
+    @Test func recaptureKeepsPreviousSnapshotAsPrev() throws {
+        let (support, vault, login) = try setup()
+        try login.capture(into: "A")
+        try write("cookies-A2", support.appendingPathComponent("Cookies"))
+        try login.capture(into: "A")
+        #expect(try read(vault.appendingPathComponent("A/desktop/Cookies")) == "cookies-A2")
+        #expect(try read(vault.appendingPathComponent("A/desktop.prev/Cookies")) == "cookies-A")
+    }
 }

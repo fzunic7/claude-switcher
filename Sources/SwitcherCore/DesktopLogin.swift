@@ -27,10 +27,25 @@ public struct DesktopLoginFiles: DesktopLoginStore {
         vaultRoot.appendingPathComponent(accountUuid).appendingPathComponent("desktop")
     }
 
+    /// Copies into a temp folder first; only a complete copy replaces the snapshot, whose
+    /// previous version is kept as `desktop.prev`.
     public func capture(into accountUuid: String) throws {
+        let fm = FileManager.default
+        let accountDir = vaultRoot.appendingPathComponent(accountUuid)
         try FileSystem.ensurePrivateDirectory(vaultRoot)
-        try FileSystem.ensurePrivateDirectory(vaultRoot.appendingPathComponent(accountUuid))
-        try copyListed(from: supportRoot, to: snapshotDir(accountUuid))
+        try FileSystem.ensurePrivateDirectory(accountDir)
+        let temp = accountDir.appendingPathComponent("desktop.tmp-\(UUID().uuidString)")
+        do { try copyListed(from: supportRoot, to: temp) } catch {
+            try? fm.removeItem(at: temp)
+            throw error
+        }
+        let snapshot = snapshotDir(accountUuid)
+        let previous = accountDir.appendingPathComponent("desktop.prev")
+        if fm.fileExists(atPath: snapshot.path) {
+            if fm.fileExists(atPath: previous.path) { try fm.removeItem(at: previous) }
+            try fm.moveItem(at: snapshot, to: previous)
+        }
+        try fm.moveItem(at: temp, to: snapshot)
     }
 
     public func hasSnapshot(_ accountUuid: String) -> Bool {

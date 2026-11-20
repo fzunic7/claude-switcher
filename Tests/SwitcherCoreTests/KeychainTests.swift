@@ -46,10 +46,38 @@ final class RecordingRunner: CommandRunner, @unchecked Sendable {
 
     @Test func writeUsesUpdateFlagViaStdinNotArgs() throws {
         let runner = RecordingRunner()
+        runner.responses = [(0, ""), (0, attrs), (0, "ab\n")]
         try SecurityCLIStore(runner: runner).write(service: "Claude Code-credentials", account: "unknown", secret: Data("ab".utf8))
         let call = try #require(runner.calls.first)
         #expect(call.args == ["-i"])
         #expect(call.stdin == "add-generic-password -U -s \"Claude Code-credentials\" -a \"unknown\" -X 6162\n")
+    }
+
+    @Test func longSecretFallsBackToArgumentsNotInteractiveMode() throws {
+        let secret = Data(repeating: UInt8(ascii: "x"), count: 3000)
+        let runner = RecordingRunner()
+        runner.responses = [(0, ""), (0, attrs), (0, String(repeating: "x", count: 3000))]
+        try SecurityCLIStore(runner: runner).write(service: "svc", account: "unknown", secret: secret)
+        let call = try #require(runner.calls.first)
+        #expect(call.args.prefix(7) == ["add-generic-password", "-U", "-s", "svc", "-a", "unknown", "-X"])
+        #expect(call.stdin == nil)
+    }
+
+    @Test func writeVerifiesReadBack() {
+        let runner = RecordingRunner()
+        runner.responses = [(0, ""), (0, attrs), (0, "truncated")]
+        #expect(throws: KeychainError.verificationFailed) {
+            try SecurityCLIStore(runner: runner).write(service: "svc", account: "unknown", secret: Data("full".utf8))
+        }
+    }
+
+    @Test func realKeychainRoundTripsLongSecret() throws {
+        let store = SecurityCLIStore(runner: ProcessRunner())
+        let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
+        defer { try? store.delete(service: service) }
+        let secret = Data((0..<3000).map { _ in UInt8.random(in: 0x21...0x7e) })
+        try store.write(service: service, account: "unknown", secret: secret)
+        #expect(try store.read(service: service)?.secret == secret)
     }
 
     @Test func writeRejectsQuotesInNames() {

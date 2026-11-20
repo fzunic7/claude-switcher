@@ -5,8 +5,9 @@ import Testing
 final class FakeDesktop: DesktopAppControl, @unchecked Sendable {
     var isRunning: Bool
     var quits = 0, launches = 0
+    var onQuit: () throws -> Void = {}
     init(running: Bool) { isRunning = running }
-    func quit() async throws { quits += 1; isRunning = false }
+    func quit() async throws { quits += 1; isRunning = false; try onQuit() }
     func launch() throws { launches += 1; isRunning = true }
 }
 
@@ -17,6 +18,25 @@ struct FailingApplyLogin: DesktopLoginStore {
     func apply(from id: String) throws { throw CocoaError(.fileWriteUnknown) }
     func backupCurrent() throws -> URL { try inner.backupCurrent() }
     func restore(from backup: URL) throws { try inner.restore(from: backup) }
+}
+
+struct FailingCaptureLogin: DesktopLoginStore {
+    let inner: DesktopLoginFiles
+    func capture(into id: String) throws { throw CocoaError(.fileWriteOutOfSpace) }
+    func hasSnapshot(_ id: String) -> Bool { inner.hasSnapshot(id) }
+    func apply(from id: String) throws { try inner.apply(from: id) }
+    func backupCurrent() throws -> URL { try inner.backupCurrent() }
+    func restore(from backup: URL) throws { try inner.restore(from: backup) }
+}
+
+struct FailingApplyAndRestoreLogin: DesktopLoginStore {
+    let inner: DesktopLoginFiles
+    let backups: URL
+    func capture(into id: String) throws { try inner.capture(into: id) }
+    func hasSnapshot(_ id: String) -> Bool { inner.hasSnapshot(id) }
+    func apply(from id: String) throws { throw CocoaError(.fileWriteUnknown) }
+    func backupCurrent() throws -> URL { try inner.backupCurrent() }
+    func restore(from backup: URL) throws { throw CocoaError(.fileWriteNoPermission) }
 }
 
 /// Two accounts, A (main) and B (backup), on a temp filesystem with an in-memory keychain.
@@ -194,5 +214,80 @@ final class World {
         _ = try await Switcher(env: running.env).switchTo("A")
         #expect(running.desktop.launches == before + 1)
         #expect(running.desktop.isRunning)
+    }
+
+    @Test func switchRefusesWhenLiveTokenBelongsToAnotherProfile() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        // ~/.claude.json says B, but a still-running claude wrote A's token into the Keychain.
+        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-A".utf8))
+        await #expect(throws: SwitchError.loginMismatch(active: "Backup", tokenOwner: "Main")) {
+            _ = try await Switcher(env: w.env).switchTo("A")
+        }
+        #expect(try w.vaultToken("B") == "tok-B")
+        #expect(try w.vaultToken("A") == "tok-A")
+    }
+
+    @Test func saveBackKeepsPreviousVaultCopy() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-B2".utf8))
+        _ = try await Switcher(env: w.env).switchTo("A")
+        let prev = try w.secrets.read(service: ServiceNames.vaultPrevious("B")).map { String(decoding: $0.secret, as: UTF8.self) }
+        #expect(prev == "tok-B")
+        #expect(try w.vaultToken("B") == "tok-B2")
+    }
+
+    @Test func desktopCaptureFailureRelaunchesDesktopAndChangesNothing() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        w.desktopLogin = FailingCaptureLogin(inner: w.realLogin)
+        await #expect {
+            _ = try await Switcher(env: w.env).switchTo("A")
+        } throws: { error in
+            if case SwitchError.stepFailed(step: "save Desktop login", _) = error { return true }
+            return false
+        }
+        #expect(w.desktop.isRunning)
+        #expect(try w.liveToken() == "tok-B")
+    }
+
+    @Test func rollbackFailureIsReportedAndBackupKept() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        w.desktopLogin = FailingApplyAndRestoreLogin(inner: w.realLogin, backups: w.base)
+        await #expect {
+            _ = try await Switcher(env: w.env).switchTo("A")
+        } throws: { error in
+            guard case SwitchError.rollbackIncomplete(step: "apply Desktop login", let failures) = error else { return false }
+            guard failures.count == 1, let f = failures.first, f.hasPrefix("Desktop login (backup kept at ") else { return false }
+            let path = String(f.dropFirst("Desktop login (backup kept at ".count).dropLast())
+            return FileManager.default.fileExists(atPath: path)
+        }
+        #expect(try w.liveToken() == "tok-B")
+    }
+
+    @Test func rollbackRemovesTargetSecretWhenThereWasNoLiveLogin() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        try w.secrets.delete(service: ServiceNames.claudeCode)
+        w.desktopLogin = FailingApplyLogin(inner: w.realLogin)
+        await #expect(throws: SwitchError.self) { _ = try await Switcher(env: w.env).switchTo("A") }
+        #expect(try w.liveToken() == nil)
+    }
+
+    @Test func stateChangedDuringSwitchIsKept() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        let store = w.env.store
+        w.desktop.onQuit = {
+            var s = try store.load()
+            s.sharedSessionIds.insert("local_9")
+            try store.save(s)
+        }
+        _ = try await Switcher(env: w.env).switchTo("A")
+        let state = try store.load()
+        #expect(state.sharedSessionIds.contains("local_9"))
+        #expect(state.activeId == "A")
     }
 }

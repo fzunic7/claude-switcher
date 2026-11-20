@@ -3,11 +3,14 @@ import Foundation
 public enum ServiceNames {
     public static let claudeCode = "Claude Code-credentials"
     public static func vault(_ accountUuid: String) -> String { "ClaudeSwitcher.\(accountUuid)" }
+    /// The vault copy as it was before the most recent save-back, so a wrong save can be undone.
+    public static func vaultPrevious(_ accountUuid: String) -> String { "ClaudeSwitcher.\(accountUuid).prev" }
 }
 
 public enum KeychainError: Error, Equatable {
     case commandFailed(status: Int32)
     case invalidName(String)
+    case verificationFailed
 }
 
 public protocol SecretStore: Sendable {
@@ -21,6 +24,7 @@ public protocol SecretStore: Sendable {
 public struct SecurityCLIStore: SecretStore {
     static let tool = "/usr/bin/security"
     static let notFound: Int32 = 44
+    static let interactiveLineLimit = 3500
     let runner: CommandRunner
 
     public init(runner: CommandRunner = ProcessRunner()) { self.runner = runner }
@@ -44,8 +48,15 @@ public struct SecurityCLIStore: SecretStore {
         }
         let hex = secret.map { String(format: "%02x", $0) }.joined()
         let command = "add-generic-password -U -s \"\(service)\" -a \"\(account)\" -X \(hex)\n"
-        let result = try runner.run(Self.tool, ["-i"], stdin: Data(command.utf8))
+        let result: (status: Int32, stdout: Data)
+        if command.utf8.count <= Self.interactiveLineLimit {
+            result = try runner.run(Self.tool, ["-i"], stdin: Data(command.utf8))
+        } else {
+            // `security -i` splits lines over ~4 KB and runs the first half; pass long secrets as arguments.
+            result = try runner.run(Self.tool, ["add-generic-password", "-U", "-s", service, "-a", account, "-X", hex])
+        }
         guard result.status == 0 else { throw KeychainError.commandFailed(status: result.status) }
+        guard try read(service: service)?.secret == secret else { throw KeychainError.verificationFailed }
     }
 
     public func delete(service: String) throws {

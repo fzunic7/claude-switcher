@@ -24,7 +24,7 @@ struct MenuView: View {
                 Button("\(model.isShared(session.id) ? "★" : "☆") \(session.title) — \(folderName(session.cwd)) · \(session.lastActivityAt.formatted(.relative(presentation: .named)))") {
                     model.toggleShared(session.id)
                 }
-                .disabled(model.state.shareAll)
+                .disabled(model.state.shareAll || model.isBusy)
             }
             Divider()
         }

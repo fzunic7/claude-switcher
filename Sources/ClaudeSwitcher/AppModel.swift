@@ -28,11 +28,13 @@ final class AppModel: ObservableObject {
     func isShared(_ id: String) -> Bool { state.shareAll || state.sharedSessionIds.contains(id) }
 
     func toggleShared(_ id: String) {
+        guard !isBusy else { return }
         if state.sharedSessionIds.contains(id) { state.sharedSessionIds.remove(id) } else { state.sharedSessionIds.insert(id) }
         persist()
     }
 
     func setShareAll(_ on: Bool) {
+        guard !isBusy else { return }
         state.shareAll = on
         persist()
     }
@@ -42,8 +44,10 @@ final class AppModel: ObservableObject {
         if running > 0 || env.desktop.isRunning {
             let alert = NSAlert()
             alert.messageText = "Switch to \(profile.label)?"
-            alert.informativeText = "Claude is running. Running CLI sessions keep the old account until restarted. Desktop will be quit and relaunched."
-            alert.addButton(withTitle: "Switch")
+            alert.informativeText = running > 0
+                ? "\(running) claude process(es) are running. Quit them first (Desktop's Code tab counts too, and is closed by the switch): a running claude can write its old account's login back over the new one."
+                : "Claude Desktop will be quit and reopened."
+            alert.addButton(withTitle: running > 0 ? "Switch Anyway" : "Switch")
             alert.addButton(withTitle: "Cancel")
             NSApp.activate(ignoringOtherApps: true)
             guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -73,7 +77,15 @@ final class AppModel: ObservableObject {
     }
 
     func remove(_ profile: Profile) {
+        guard !isBusy else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove \(profile.label)?"
+        alert.informativeText = "This deletes the saved login for \(profile.email). You'll need to sign in to it again to re-add it."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         try? env.secrets.delete(service: ServiceNames.vault(profile.id))
+        try? env.secrets.delete(service: ServiceNames.vaultPrevious(profile.id))
         try? FileManager.default.removeItem(at: SwitcherEnvironment.switcherRoot.appendingPathComponent("vault/\(profile.id)"))
         state.profiles.removeAll { $0.id == profile.id }
         if state.activeId == profile.id { state.activeId = nil }
@@ -90,7 +102,13 @@ final class AppModel: ObservableObject {
         switch error {
         case SwitchError.stepFailed(let step, let underlying):
             alert.messageText = "Switch failed at: \(step)"
-            alert.informativeText = "Nothing was changed.\n\n\(underlying)"
+            alert.informativeText = "You are still on your previous account; its login was put back.\n\n\(underlying)"
+        case SwitchError.rollbackIncomplete(let step, let failures):
+            alert.messageText = "Switch failed at: \(step), and some things could not be put back"
+            alert.informativeText = "Check these before using Claude:\n• " + failures.joined(separator: "\n• ")
+        case SwitchError.loginMismatch(let active, let owner):
+            alert.messageText = "Login mismatch — switch stopped"
+            alert.informativeText = "~/.claude.json says \(active), but the Claude Code login in the Keychain is \(owner)'s. A running claude probably wrote it back. Quit all claude processes, run `claude` → /login as \(active), then try again. Nothing was changed."
         case SwitchError.noLiveLogin:
             alert.messageText = "No Claude Code login found"
             alert.informativeText = "Sign in with `claude` then `/login` first."
