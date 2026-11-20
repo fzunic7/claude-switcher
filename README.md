@@ -9,9 +9,12 @@ Needs only the Xcode Command Line Tools (macOS 14+).
 ```bash
 scripts/test.sh          # run the tests
 scripts/bundle.sh        # builds dist/Claude Switcher.app
+scripts/dmg.sh           # builds dist/ClaudeSwitcher-<version>.dmg
 ```
 
-Copy `dist/Claude Switcher.app` to `/Applications` and open it. It lives in the menu bar (M = main, B = backup).
+Open the `.dmg` and drag **Claude Switcher** onto **Applications**, then open it from Applications. It lives in the menu bar (M = main, B = backup). The version comes from `CFBundleShortVersionString` in `Resources/Info.plist`.
+
+The app is ad-hoc signed, not notarized. A copy you built yourself opens normally. A `.dmg` downloaded from the internet (e.g. a GitHub release) is blocked the first time: right-click the app → **Open**, or allow it in System Settings → Privacy & Security. Removing that prompt for everyone needs an Apple Developer ID and notarization.
 
 ## First-time setup
 
