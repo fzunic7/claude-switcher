@@ -166,6 +166,50 @@ public final class Switcher: @unchecked Sendable {
         }
     }
 
+    /// Points the Claude Code login (CLI and VS Code) at a saved account. Desktop and sessions are untouched.
+    public func switchCLI(to id: String) throws {
+        var state = try env.store.load()
+        guard let profile = state.profile(id) else { throw SwitchError.unknownProfile(id) }
+        guard let saved = try env.secrets.read(service: ServiceNames.vault(id)) else { throw SwitchError.missingSecret(profile.label) }
+        let live = try env.secrets.read(service: ServiceNames.claudeCode)
+        let jsonBefore = try env.claudeJSON.rawContents()
+        do {
+            try env.secrets.write(service: ServiceNames.claudeCode, account: live?.account ?? saved.account, secret: saved.secret)
+            try env.claudeJSON.writeAccount(profile.oauthAccount)
+        } catch {
+            if let live { try? env.secrets.write(service: ServiceNames.claudeCode, account: live.account, secret: live.secret) }
+            else { try? env.secrets.delete(service: ServiceNames.claudeCode) }
+            try? env.claudeJSON.restore(jsonBefore)
+            throw SwitchError.stepFailed(step: "switch Claude Code login", underlying: String(describing: error))
+        }
+        state.activeId = id
+        try env.store.save(state)
+    }
+
+    /// Saves the live Claude Code login into its saved account, if that account is saved here.
+    public func saveLiveLoginBack() throws {
+        let state = try env.store.load()
+        guard let id = try env.claudeJSON.readAccount()?["accountUuid"]?.stringValue, state.profile(id) != nil,
+              let live = try env.secrets.read(service: ServiceNames.claudeCode) else { return }
+        for other in state.profiles where other.id != id {
+            if try env.secrets.read(service: ServiceNames.vault(other.id))?.secret == live.secret { return }
+        }
+        try saveVault(id, account: live.account, secret: live.secret)
+    }
+
+    /// Forgets a saved account: its saved logins (Claude Code and Desktop) are deleted.
+    public func removeProfile(_ id: String) throws {
+        var state = try env.store.load()
+        try env.secrets.delete(service: ServiceNames.vault(id))
+        try env.secrets.delete(service: ServiceNames.vaultPrevious(id))
+        try env.desktopLogin.removeSnapshot(id)
+        state.profiles.removeAll { $0.id == id }
+        state.lastUsage[id] = nil
+        if try env.claudeJSON.readAccount()?["accountUuid"]?.stringValue == id { state.ignoredAccountId = id }
+        if state.activeId == id { state.activeId = nil }
+        try env.store.save(state)
+    }
+
     /// The account Claude Desktop is signed in to. Desktop's config names the old account until it runs
     /// again after we swap its files, so our own record wins while the config is older than our last apply.
     private func desktopOwner(_ state: SwitcherState) -> String? {

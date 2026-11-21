@@ -6,6 +6,11 @@ public protocol DesktopLoginStore: Sendable {
     func apply(from accountUuid: String) throws
     func backupCurrent() throws -> URL
     func restore(from backup: URL) throws
+    func removeSnapshot(_ accountUuid: String) throws
+}
+
+public extension DesktopLoginStore {
+    func removeSnapshot(_ accountUuid: String) throws {}
 }
 
 /// Copies the Claude Desktop files that hold its sign-in in and out of a per-account vault folder.
@@ -46,6 +51,11 @@ public struct DesktopLoginFiles: DesktopLoginStore {
             try fm.moveItem(at: snapshot, to: previous)
         }
         try fm.moveItem(at: temp, to: snapshot)
+    }
+
+    public func removeSnapshot(_ accountUuid: String) throws {
+        let dir = vaultRoot.appendingPathComponent(accountUuid)
+        if FileManager.default.fileExists(atPath: dir.path) { try FileManager.default.removeItem(at: dir) }
     }
 
     public func hasSnapshot(_ accountUuid: String) -> Bool {
