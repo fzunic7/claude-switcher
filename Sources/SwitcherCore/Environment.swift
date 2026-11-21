@@ -13,9 +13,11 @@ public struct SwitcherEnvironment: Sendable {
     public var desktopLogin: DesktopLoginStore
     public var sessions: SessionSharing
     public var desktop: DesktopAppControl
+    public var desktopAccount: DesktopAccountReading
 
     public init(store: ProfileStore, secrets: SecretStore, claudeJSON: ClaudeJSON, desktopLogin: DesktopLoginStore,
-                sessions: SessionSharing, desktop: DesktopAppControl) {
+                sessions: SessionSharing, desktop: DesktopAppControl, desktopAccount: DesktopAccountReading) {
+        self.desktopAccount = desktopAccount
         self.store = store; self.secrets = secrets; self.claudeJSON = claudeJSON
         self.desktopLogin = desktopLogin; self.sessions = sessions; self.desktop = desktop
     }
@@ -37,6 +39,7 @@ public extension SwitcherEnvironment {
             claudeJSON: ClaudeJSON(url: home.appendingPathComponent(".claude.json")),
             desktopLogin: DesktopLoginFiles(supportRoot: desktopSupportRoot, vaultRoot: switcherRoot.appendingPathComponent("vault")),
             sessions: SessionIndex(sessionsRoot: desktopSupportRoot.appendingPathComponent("claude-code-sessions")),
-            desktop: desktop)
+            desktop: desktop,
+            desktopAccount: DesktopConfigReader(configURL: desktopSupportRoot.appendingPathComponent("config.json")))
     }
 }

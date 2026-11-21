@@ -81,9 +81,13 @@ public final class Switcher: @unchecked Sendable {
 
         // 2. Quit Desktop and save its live login back too; on failure reopen it and stop.
         let wasRunning = env.desktop.isRunning
+        var desktopCapturedFor: String?
         do {
             if wasRunning { try await env.desktop.quit() }
-            if let profile = current, profile.hasDesktopSnapshot { try env.desktopLogin.capture(into: profile.id) }
+            if let owner = desktopOwner(state), state.profile(owner) != nil {
+                try env.desktopLogin.capture(into: owner)
+                desktopCapturedFor = owner
+            }
         } catch {
             if wasRunning && !env.desktop.isRunning { try? env.desktop.launch() }
             if let e = error as? SwitchError { throw e }
@@ -104,21 +108,19 @@ public final class Switcher: @unchecked Sendable {
             try env.claudeJSON.writeAccount(target.oauthAccount)
 
             var warnings: [String] = []
+            var appliedDesktop = false
             step = "apply Desktop login"
-            if target.hasDesktopSnapshot && env.desktopLogin.hasSnapshot(targetId) {
+            if env.desktopLogin.hasSnapshot(targetId) {
                 try env.desktopLogin.apply(from: targetId)
+                appliedDesktop = true
             } else {
-                warnings.append("No Desktop login saved for \(target.label); Desktop left unchanged.")
+                warnings.append("Sign in to Claude Desktop once as \(target.label); the app remembers it after that.")
             }
 
-            step = "share sessions"
+            step = "merge Desktop sessions"
             var shared: [String] = []
             if let profile = current, !profile.orgUuid.isEmpty, !target.orgUuid.isEmpty {
-                let from = (profile.id, profile.orgUuid), to = (target.id, target.orgUuid)
-                let ids = state.shareAll
-                    ? Set(try env.sessions.list(account: from.0, org: from.1).map(\.id))
-                    : state.sharedSessionIds
-                shared = try env.sessions.share(ids: ids, from: from, to: to)
+                shared = try env.sessions.merge((profile.id, profile.orgUuid), (target.id, target.orgUuid)).toB
             }
 
             step = "save switcher state"
@@ -126,6 +128,18 @@ public final class Switcher: @unchecked Sendable {
             var fresh = try env.store.load()
             if let profile = current, let i = fresh.profiles.firstIndex(where: { $0.id == profile.id }) {
                 fresh.profiles[i].oauthAccount = profile.oauthAccount
+            }
+            if let owner = desktopCapturedFor, let i = fresh.profiles.firstIndex(where: { $0.id == owner }) {
+                fresh.profiles[i].hasDesktopSnapshot = true
+            }
+            if appliedDesktop {
+                fresh.desktopAccountId = targetId
+                fresh.desktopAppliedAt = Date()
+            }
+            // Keep Claude Code's last usage numbers for the account we're leaving.
+            if let profile = current, let cache = UsageParser.parseCache(jsonBefore, accountUuid: profile.id),
+               cache.fetchedAt > (fresh.lastUsage[profile.id]?.fetchedAt ?? .distantPast) {
+                fresh.lastUsage[profile.id] = cache
             }
             fresh.activeId = targetId
             try env.store.save(fresh)
@@ -150,6 +164,17 @@ public final class Switcher: @unchecked Sendable {
             if !failures.isEmpty { throw SwitchError.rollbackIncomplete(step: step, failures: failures) }
             throw SwitchError.stepFailed(step: step, underlying: String(describing: error))
         }
+    }
+
+    /// The account Claude Desktop is signed in to. Desktop's config names the old account until it runs
+    /// again after we swap its files, so our own record wins while the config is older than our last apply.
+    private func desktopOwner(_ state: SwitcherState) -> String? {
+        let config = env.desktopAccount.signedInAccount()
+        if let recorded = state.desktopAccountId, let appliedAt = state.desktopAppliedAt,
+           config == nil || config!.modifiedAt <= appliedAt {
+            return recorded
+        }
+        return config?.id
     }
 
     private func saveVault(_ id: String, account: String, secret: Data) throws {

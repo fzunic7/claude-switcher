@@ -12,6 +12,7 @@ public struct DesktopSession: Identifiable, Equatable, Sendable {
 public protocol SessionSharing: Sendable {
     func list(account: String, org: String) throws -> [DesktopSession]
     func share(ids: Set<String>, from: (String, String), to: (String, String)) throws -> [String]
+    func merge(_ a: (String, String), _ b: (String, String)) throws -> (toA: [String], toB: [String])
 }
 
 /// Claude Desktop's per-account Code session list: `<root>/<accountUuid>/<orgUuid>/local_<id>.json`.
@@ -67,5 +68,23 @@ public struct SessionIndex: SessionSharing {
             copied.append(id)
         }
         return copied
+    }
+
+    /// Makes both accounts' session lists contain every session either has. Never overwrites.
+    public func merge(_ a: (String, String), _ b: (String, String)) throws -> (toA: [String], toB: [String]) {
+        let toB = try share(ids: allIds(a), from: a, to: b)
+        let toA = try share(ids: allIds(b), from: b, to: a)
+        return (toA, toB)
+    }
+
+    /// Every session record id in a folder, archived ones included.
+    func allIds(_ folder: (String, String)) throws -> Set<String> {
+        let dir = self.folder(folder.0, folder.1)
+        guard FileManager.default.fileExists(atPath: dir.path) else { return [] }
+        return Set(try FileManager.default.contentsOfDirectory(atPath: dir.path).compactMap { name in
+            guard name.hasSuffix(".json") else { return nil }
+            let id = String(name.dropLast(5))
+            return Self.isSessionId(id) ? id : nil
+        })
     }
 }

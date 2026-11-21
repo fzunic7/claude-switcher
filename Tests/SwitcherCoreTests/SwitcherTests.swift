@@ -39,11 +39,18 @@ struct FailingApplyAndRestoreLogin: DesktopLoginStore {
     func restore(from backup: URL) throws { throw CocoaError(.fileWriteNoPermission) }
 }
 
+final class FakeDesktopAccount: DesktopAccountReading, @unchecked Sendable {
+    var id: String?
+    var modifiedAt = Date()
+    func signedInAccount() -> (id: String, modifiedAt: Date)? { id.map { ($0, modifiedAt) } }
+}
+
 /// Two accounts, A (main) and B (backup), on a temp filesystem with an in-memory keychain.
 final class World {
     let base: URL
     let secrets = InMemorySecretStore()
     let desktop: FakeDesktop
+    let desktopAccount = FakeDesktopAccount()
     let claudeJSONURL: URL
     let support: URL
     var desktopLogin: DesktopLoginStore
@@ -63,7 +70,7 @@ final class World {
         SwitcherEnvironment(store: ProfileStore(root: base.appendingPathComponent("switcher")), secrets: secrets,
                             claudeJSON: ClaudeJSON(url: claudeJSONURL), desktopLogin: desktopLogin,
                             sessions: SessionIndex(sessionsRoot: support.appendingPathComponent("claude-code-sessions")),
-                            desktop: desktop)
+                            desktop: desktop, desktopAccount: desktopAccount)
     }
 
     func signIn(_ id: String, token: String) throws {
@@ -71,6 +78,8 @@ final class World {
         try Data(json.utf8).write(to: claudeJSONURL)
         try secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data(token.utf8))
         try Data("cookies-\(id)".utf8).write(to: support.appendingPathComponent("Cookies"))
+        desktopAccount.id = id
+        desktopAccount.modifiedAt = Date()
     }
 
     func cookies() throws -> String { String(decoding: try Data(contentsOf: support.appendingPathComponent("Cookies")), as: UTF8.self) }
@@ -152,36 +161,71 @@ final class World {
         try w.signIn("B", token: "tok-B")
         _ = try await Switcher(env: w.env).captureCurrent(label: "Backup", role: .backup, includeDesktop: false)
         let result = try await Switcher(env: w.env).switchTo("A")
-        #expect(result.warnings == ["No Desktop login saved for Main; Desktop left unchanged."])
+        #expect(result.warnings == ["Sign in to Claude Desktop once as Main; the app remembers it after that."])
         #expect(try w.cookies() == "cookies-B")
         #expect(try w.liveToken() == "tok-A")
     }
 
-    @Test func switchSharesSelectedSessions() async throws {
+    @Test func switchMergesSessionsBothWays() async throws {
         let w = try World()
         try await w.captureBoth()
         try w.writeSession(account: "B", id: "local_1")
-        try w.writeSession(account: "B", id: "local_2")
-        var state = try w.env.store.load()
-        state.sharedSessionIds = ["local_1"]
-        try w.env.store.save(state)
+        try w.writeSession(account: "A", id: "local_2")
         let result = try await Switcher(env: w.env).switchTo("A")
         #expect(result.sharedSessionIds == ["local_1"])
-        let target = w.support.appendingPathComponent("claude-code-sessions/A/org-A")
-        #expect(FileManager.default.fileExists(atPath: target.appendingPathComponent("local_1.json").path))
-        #expect(!FileManager.default.fileExists(atPath: target.appendingPathComponent("local_2.json").path))
+        let root = w.support.appendingPathComponent("claude-code-sessions")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("A/org-A/local_1.json").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("B/org-B/local_2.json").path))
     }
 
-    @Test func shareAllSharesEverySession() async throws {
+    @Test func desktopLoginSavedUnderDesktopsAccountNotCLIs() async throws {
+        let w = try World()
+        try await w.captureBoth()                       // CLI and Desktop on B
+        w.desktopAccount.id = "A"                       // user signed Desktop into A by hand
+        try Data("cookies-A-live".utf8).write(to: w.support.appendingPathComponent("Cookies"))
+        _ = try await Switcher(env: w.env).switchTo("A")
+        let vault = w.base.appendingPathComponent("switcher/vault")
+        func snap(_ id: String) throws -> String {
+            String(decoding: try Data(contentsOf: vault.appendingPathComponent("\(id)/desktop/Cookies")), as: UTF8.self)
+        }
+        #expect(try snap("A") == "cookies-A-live")
+        #expect(try snap("B") == "cookies-B")
+    }
+
+    @Test func staleDesktopConfigUsesSwitcherRecord() async throws {
         let w = try World()
         try await w.captureBoth()
-        try w.writeSession(account: "B", id: "local_1")
-        try w.writeSession(account: "B", id: "local_2")
-        var state = try w.env.store.load()
-        state.shareAll = true
-        try w.env.store.save(state)
-        let result = try await Switcher(env: w.env).switchTo("A")
-        #expect(Set(result.sharedSessionIds) == ["local_1", "local_2"])
+        w.desktopAccount.modifiedAt = Date(timeIntervalSince1970: 1_000)   // config untouched since long ago, says B
+        _ = try await Switcher(env: w.env).switchTo("A")                    // applies A's Desktop login
+        try Data("cookies-A-used".utf8).write(to: w.support.appendingPathComponent("Cookies"))
+        _ = try await Switcher(env: w.env).switchTo("B")                    // config still says B (stale)
+        let snapA = w.base.appendingPathComponent("switcher/vault/A/desktop/Cookies")
+        #expect(String(decoding: try Data(contentsOf: snapA), as: UTF8.self) == "cookies-A-used")
+        #expect(try w.cookies() == "cookies-B")
+        let state = try w.env.store.load()
+        #expect(state.desktopAccountId == "B")
+    }
+
+    @Test func desktopLoginNotSavedWhenDesktopAccountUnknown() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        w.desktopAccount.id = "Z"
+        try Data("cookies-Z".utf8).write(to: w.support.appendingPathComponent("Cookies"))
+        _ = try await Switcher(env: w.env).switchTo("A")
+        let vault = w.base.appendingPathComponent("switcher/vault")
+        #expect(!FileManager.default.fileExists(atPath: vault.appendingPathComponent("Z").path))
+        #expect(String(decoding: try Data(contentsOf: vault.appendingPathComponent("B/desktop/Cookies")), as: UTF8.self) == "cookies-B")
+    }
+
+    @Test func switchStoresClaudeCodeUsageCacheForAccountLeft() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        let json = #"{"oauthAccount":{"accountUuid":"B","organizationUuid":"org-B","emailAddress":"B@x"},"cachedUsageUtilization":{"fetchedAtMs":1700000000000,"accountUuid":"B","utilization":{"five_hour":{"utilization":88,"resets_at":null}}}}"#
+        try Data(json.utf8).write(to: w.claudeJSONURL)
+        _ = try await Switcher(env: w.env).switchTo("A")
+        let state = try w.env.store.load()
+        #expect(state.lastUsage["B"]?.session?.utilization == 88)
+        #expect(state.lastUsage["B"]?.isLive == false)
     }
 
     @Test func failureDuringDesktopApplyRestoresEverything() async throws {
@@ -282,12 +326,12 @@ final class World {
         let store = w.env.store
         w.desktop.onQuit = {
             var s = try store.load()
-            s.sharedSessionIds.insert("local_9")
+            s.lastUsage["Z"] = AccountUsage(session: nil, weekly: nil, extra: nil, fetchedAt: Date(timeIntervalSince1970: 1), isLive: false)
             try store.save(s)
         }
         _ = try await Switcher(env: w.env).switchTo("A")
         let state = try store.load()
-        #expect(state.sharedSessionIds.contains("local_9"))
+        #expect(state.lastUsage["Z"] != nil)
         #expect(state.activeId == "A")
     }
 }

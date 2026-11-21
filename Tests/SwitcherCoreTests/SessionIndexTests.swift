@@ -67,4 +67,18 @@ import Testing
         let (_, index) = try setup()
         #expect(try index.share(ids: ["local_99", "../escape"], from: ("A", "O"), to: ("B", "P")) == [])
     }
+
+    @Test func mergeCopiesBothWaysWithoutOverwriting() throws {
+        let (root, index) = try setup()                 // A/O has local_1, local_2, local_3 (archived)
+        let b = root.appendingPathComponent("B/P")
+        try fm.createDirectory(at: b, withIntermediateDirectories: true)
+        try Data("b-version".utf8).write(to: b.appendingPathComponent("local_2.json"))
+        try record("only-b", 10).write(to: b.appendingPathComponent("local_5.json"))
+        let result = try index.merge(("A", "O"), ("B", "P"))
+        #expect(result.toA == ["local_5"])
+        #expect(result.toB == ["local_1", "local_3"])
+        #expect(try Data(contentsOf: b.appendingPathComponent("local_2.json")) == Data("b-version".utf8))
+        #expect(fm.fileExists(atPath: root.appendingPathComponent("A/O/local_5.json").path))
+        #expect(!fm.fileExists(atPath: b.appendingPathComponent("deleted_local_4.json").path))
+    }
 }
