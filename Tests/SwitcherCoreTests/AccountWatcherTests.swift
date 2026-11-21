@@ -285,3 +285,16 @@ import Testing
         #expect(try w.env.store.load().profiles.isEmpty)
     }
 }
+
+@Suite struct ReAddTests {
+    @Test func addAccountReAddsARemovedLiveAccount() async throws {
+        let w = try World()
+        try await w.captureBoth()                                // B live
+        try Switcher(env: w.env).removeProfile("B")              // ignored while live
+        let watcher = AccountWatcher(env: w.env)
+        try watcher.beginAdd()                                   // the user explicitly adds it again
+        guard case .added(let p) = try await watcher.check() else { Issue.record("B should be re-added"); return }
+        #expect(p.id == "B")
+        #expect(try w.env.store.load().ignoredAccountId == nil)
+    }
+}

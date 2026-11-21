@@ -117,7 +117,7 @@ struct AccountCard: View {
                     Image(systemName: "bolt.slash").font(.caption).foregroundStyle(.secondary)
                     Text("Extra usage").font(.callout)
                     Spacer()
-                    Text(usage?.extra?.isEnabled == true ? "On" : "Off").font(.callout).foregroundStyle(.secondary)
+                    Text(usage?.extra.map { $0.isEnabled ? "On" : "Off" } ?? "–").font(.callout).foregroundStyle(.secondary)
                 }
             }
             if !profile.hasDesktopSnapshot {

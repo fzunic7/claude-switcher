@@ -23,7 +23,13 @@ public final class AccountWatcher: @unchecked Sendable {
     /// Call right before starting a sign-in. Saves the current login first, because the sign-in replaces it.
     public func beginAdd() throws {
         try switcher.saveLiveLoginBack()
-        returnTo = try env.liveKnownId(try env.store.load())
+        // An explicit add overrides "removed while signed in".
+        var state = try env.store.load()
+        if state.ignoredAccountId != nil {
+            state.ignoredAccountId = nil
+            try env.store.save(state)
+        }
+        returnTo = try env.liveKnownId(state)
         isAdding = true
     }
 

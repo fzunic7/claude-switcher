@@ -13,6 +13,8 @@ struct UsageTab: View {
                     Text("Sign in on the Claude website and it's saved automatically. You can also run `claude auth login` yourself — I'll pick it up.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Add account") { model.addAccount() }.disabled(model.isAdding || model.isBusy)
+                    Text("Tip: sign in to that account on claude.ai in your browser first — the sign-in uses whoever is logged in there.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
             }
             ForEach(model.orderedProfiles) { AccountCard(model: model, profile: $0) }
@@ -122,6 +124,8 @@ struct AccountsTab: View {
                             ProgressView().controlSize(.small)
                             Text("Waiting for you to sign in in the browser…").font(.callout)
                         }
+                        Text("The browser signs in whoever is logged in to claude.ai there. To add a different account, switch accounts on claude.ai (or use a private window) before approving.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     HStack {
                         Button("Use Terminal instead") { model.signInInTerminal() }
@@ -133,6 +137,8 @@ struct AccountsTab: View {
             } else {
                 Button { model.addAccount() } label: { Label("Add account", systemImage: "plus") }
                     .disabled(model.isBusy)
+                Text("Tip: sign in to the account you want to add on claude.ai in your browser first.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }

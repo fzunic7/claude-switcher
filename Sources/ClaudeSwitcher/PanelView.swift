@@ -26,12 +26,12 @@ struct PanelView: View {
                     case .accounts: AccountsTab(model: model)
                     }
                 }
-                .frame(maxHeight: 480)
+                .frame(height: 560)
             }
             footer
         }
         .padding(14)
-        .frame(width: 360)
+        .frame(width: 380)
         .onAppear { model.panelOpened() }
     }
 

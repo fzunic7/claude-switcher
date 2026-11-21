@@ -117,21 +117,27 @@ final class AppModel: ObservableObject {
 
     func addAccount() {
         guard !isAdding, !isBusy else { return }
-        do {
-            try watcher.beginAdd()
-            signInStalled = false
+        isAdding = true
+        signInStalled = false
+        tab = .accounts
+        let watcher = self.watcher
+        Task {
             do {
-                loginProcess = try LoginLauncher.startLogin()
-                watcher.signInInProgress = true
+                // Saving the current login and finding `claude` run subprocesses: keep them off the main thread.
+                let process: Process? = try await Task.detached {
+                    try watcher.beginAdd()
+                    if let p = try? LoginLauncher.startLogin() { return p }
+                    try LoginLauncher.openInTerminal()
+                    return nil
+                }.value
+                loginProcess = process
+                watcher.signInInProgress = process != nil
+                addStartedAt = Date()
             } catch {
-                try LoginLauncher.openInTerminal()
+                watcher.cancelAdd()
+                isAdding = false
+                showError(error)
             }
-            isAdding = true
-            addStartedAt = Date()
-            tab = .accounts
-        } catch {
-            watcher.cancelAdd()
-            showError(error)
         }
     }
 
@@ -188,15 +194,24 @@ final class AppModel: ObservableObject {
         alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        do { try switcher.removeProfile(profile.id) } catch { showError(error) }
-        reload()
-        usage[profile.id] = nil
+        isBusy = true
+        let switcher = self.switcher
+        Task {
+            do { try await Task.detached { try switcher.removeProfile(profile.id) }.value } catch { showError(error) }
+            usage[profile.id] = nil
+            isBusy = false
+            reload()
+        }
     }
 
     private func persist() {
         // Merge onto the latest file so a concurrent switch/watch isn't overwritten.
         guard var latest = try? env.store.load() else { return }
-        latest.profiles = state.profiles
+        for edited in state.profiles {
+            guard let i = latest.profiles.firstIndex(where: { $0.id == edited.id }) else { continue }
+            latest.profiles[i].label = edited.label
+            latest.profiles[i].role = edited.role
+        }
         do { try env.store.save(latest) } catch { showError(error) }
         reload()
     }
@@ -205,6 +220,8 @@ final class AppModel: ObservableObject {
 
     func switchTo(_ profile: Profile) async {
         guard !isBusy, !isAdding else { return }
+        isBusy = true          // also pauses background account checks while the confirmation is up
+        defer { isBusy = false; reload() }
         let running = (try? RunningClaude().cliProcessCount()) ?? 0
         if running > 0 || env.desktop.isRunning {
             let alert = NSAlert()
@@ -217,8 +234,6 @@ final class AppModel: ObservableObject {
             NSApp.activate(ignoringOtherApps: true)
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        isBusy = true
-        defer { isBusy = false; reload() }
         do {
             let result = try await switcher.switchTo(profile.id)
             var body = "Restart running `claude` and reload VS Code's Claude panel; `claude --resume` shows all your sessions."
@@ -275,6 +290,9 @@ final class AppModel: ObservableObject {
         case SwitchError.loginMismatch(let active, let owner):
             alert.messageText = "Login mismatch — switch stopped"
             alert.informativeText = "~/.claude.json says \(active), but the Claude Code login in the Keychain is \(owner)'s. A running claude probably wrote it back. Quit all claude processes, run `claude auth login` as \(active), then try again. Nothing was changed."
+        case SwitchError.unsavedLiveLogin(let email):
+            alert.messageText = "Claude Code is signed in to \(email), which isn't saved yet"
+            alert.informativeText = "Give it a few seconds to be added automatically, then try again. Nothing was changed."
         case SwitchError.noLiveLogin:
             alert.messageText = "No Claude Code login found"
             alert.informativeText = "Use Add account to sign in."
