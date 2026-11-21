@@ -6,16 +6,13 @@ struct ClaudeSwitcherApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(model: model)
+            PanelView(model: model)
         } label: {
-            Label(model.active.map { $0.role == .main ? "M" : "B" } ?? "?", systemImage: "person.2.circle")
-                .labelStyle(.titleAndIcon)
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+                Text(model.menuBarTitle)
+            }
         }
-        .menuBarExtraStyle(.menu)
-
-        Window("Claude Accounts", id: "accounts") {
-            AccountsWindow(model: model)
-        }
-        .windowResizability(.contentSize)
+        .menuBarExtraStyle(.window)
     }
 }

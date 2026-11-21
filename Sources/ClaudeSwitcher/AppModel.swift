@@ -1,45 +1,190 @@
 import AppKit
+import ServiceManagement
 import SwitcherCore
 import UserNotifications
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum Tab: String, CaseIterable, Identifiable {
+        case usage = "Usage", costs = "Costs", accounts = "Accounts"
+        var id: String { rawValue }
+    }
+
     @Published var state = SwitcherState()
-    @Published var sessions: [DesktopSession] = []
+    @Published var usage: [String: AccountUsage] = [:]
+    @Published var tab: Tab = .usage
+    @Published var showSettings = false
     @Published var isBusy = false
+    @Published var isAdding = false
+    @Published var isRefreshing = false
+    @Published var renamingId: String?
+    @Published var renameText = ""
+    @Published var openAtLogin = SMAppService.mainApp.status == .enabled
 
     let env = SwitcherEnvironment.live(desktop: LiveDesktopApp())
+    private lazy var watcher = AccountWatcher(env: env)
+    private lazy var usageService = UsageService(secrets: env.secrets, claudeJSON: env.claudeJSON, store: env.store)
     private var switcher: Switcher { Switcher(env: env) }
 
-    init() { reload() }
+    private var timer: Timer?
+    private var lastAccountCheck = Date.distantPast
+    private var lastUsageRefresh = Date.distantPast
+    private var loginProcess: Process?
+    private var addStartedAt: Date?
+    private var usedTerminalFallback = false
+
+    init() {
+        reload()
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.tick() }
+        }
+        Task { await checkAccounts(); await refreshUsage(force: true) }
+    }
+
+    // MARK: Derived
 
     var active: Profile? { state.activeId.flatMap { state.profile($0) } }
-    var others: [Profile] { state.profiles.filter { $0.id != state.activeId } }
 
-    func reload() {
-        state = (try? env.store.load()) ?? SwitcherState()
-        if let p = active {
-            sessions = Array(((try? env.sessions.list(account: p.id, org: p.orgUuid)) ?? []).prefix(10))
-        } else {
-            sessions = []
+    /// Active first, then main, then the rest by label.
+    var orderedProfiles: [Profile] {
+        state.profiles.sorted { a, b in
+            if (a.id == state.activeId) != (b.id == state.activeId) { return a.id == state.activeId }
+            if a.role != b.role { return a.role == .main }
+            return a.label.localizedCaseInsensitiveCompare(b.label) == .orderedAscending
         }
     }
 
-    func isShared(_ id: String) -> Bool { state.shareAll || state.sharedSessionIds.contains(id) }
+    var menuBarTitle: String {
+        guard let active else { return "Claude" }
+        guard let session = usage[active.id]?.session else { return "\(active.label) –" }
+        return "\(active.label) \(Int(session.utilization.rounded()))%"
+    }
 
-    func toggleShared(_ id: String) {
+    // MARK: Timers
+
+    private func tick() async {
+        if let started = addStartedAt, Date().timeIntervalSince(started) > 300 { cancelAdd() }
+        if isAdding || Date().timeIntervalSince(lastAccountCheck) >= 30 { await checkAccounts() }
+        if Date().timeIntervalSince(lastUsageRefresh) >= 300 { await refreshUsage(force: true) }
+        if isAdding, let p = loginProcess, !p.isRunning, p.terminationStatus != 0, !usedTerminalFallback {
+            usedTerminalFallback = true
+            try? LoginLauncher.openInTerminal()
+        }
+    }
+
+    func panelOpened() {
+        Task { await checkAccounts(); await refreshUsage(force: false) }
+    }
+
+    func reload() {
+        state = (try? env.store.load()) ?? SwitcherState()
+    }
+
+    // MARK: Accounts
+
+    func checkAccounts() async {
+        lastAccountCheck = Date()
         guard !isBusy else { return }
-        if state.sharedSessionIds.contains(id) { state.sharedSessionIds.remove(id) } else { state.sharedSessionIds.insert(id) }
+        do {
+            let event = try await watcher.check()
+            switch event {
+            case .none: break
+            case .added(let p):
+                notify(title: "Added \(p.email)", body: "Saved as \(p.role == .main ? "Main" : "Backup").")
+            case .addedAndRestored(let p, let restored):
+                let back = state.profile(restored)?.label ?? "your previous account"
+                notify(title: "Added \(p.email)", body: "You're still on \(back).")
+            }
+            if event != .none { reload(); await refreshUsage(force: true) }
+        } catch {
+            showError(error)
+        }
+        if isAdding && !watcher.isAdding { finishAdd() }
+    }
+
+    func addAccount() {
+        guard !isAdding, !isBusy else { return }
+        do {
+            try watcher.beginAdd()
+            usedTerminalFallback = false
+            do {
+                loginProcess = try LoginLauncher.startLogin()
+            } catch {
+                usedTerminalFallback = true
+                try LoginLauncher.openInTerminal()
+            }
+            isAdding = true
+            addStartedAt = Date()
+            tab = .accounts
+        } catch {
+            watcher.cancelAdd()
+            showError(error)
+        }
+    }
+
+    func signInInTerminal() {
+        usedTerminalFallback = true
+        loginProcess?.terminate()
+        do { try LoginLauncher.openInTerminal() } catch { showError(error) }
+    }
+
+    func cancelAdd() {
+        watcher.cancelAdd()
+        finishAdd()
+    }
+
+    private func finishAdd() {
+        if let p = loginProcess, p.isRunning { p.terminate() }
+        loginProcess = nil
+        addStartedAt = nil
+        isAdding = false
+    }
+
+    func startRename(_ profile: Profile) {
+        renamingId = profile.id
+        renameText = profile.label
+    }
+
+    func commitRename() {
+        let text = renameText.trimmingCharacters(in: .whitespaces)
+        if let id = renamingId, !text.isEmpty, let i = state.profiles.firstIndex(where: { $0.id == id }) {
+            state.profiles[i].label = text
+            persist()
+        }
+        renamingId = nil
+    }
+
+    func makeMain(_ profile: Profile) {
+        for i in state.profiles.indices { state.profiles[i].role = state.profiles[i].id == profile.id ? .main : .backup }
         persist()
     }
 
-    func setShareAll(_ on: Bool) {
+    func remove(_ profile: Profile) {
         guard !isBusy else { return }
-        state.shareAll = on
-        persist()
+        let alert = NSAlert()
+        alert.messageText = "Remove \(profile.email)?"
+        alert.informativeText = "This deletes its saved login. Your sessions are not affected. Add it again any time by signing in."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do { try switcher.removeProfile(profile.id) } catch { showError(error) }
+        reload()
+        usage[profile.id] = nil
     }
+
+    private func persist() {
+        // Merge onto the latest file so a concurrent switch/watch isn't overwritten.
+        guard var latest = try? env.store.load() else { return }
+        latest.profiles = state.profiles
+        do { try env.store.save(latest) } catch { showError(error) }
+        reload()
+    }
+
+    // MARK: Switching
 
     func switchTo(_ profile: Profile) async {
+        guard !isBusy, !isAdding else { return }
         let running = (try? RunningClaude().cliProcessCount()) ?? 0
         if running > 0 || env.desktop.isRunning {
             let alert = NSAlert()
@@ -56,65 +201,58 @@ final class AppModel: ObservableObject {
         defer { isBusy = false; reload() }
         do {
             let result = try await switcher.switchTo(profile.id)
-            var body = "Restart running `claude` and reload VS Code's Claude panel; use `claude --resume` to continue."
-            if !result.sharedSessionIds.isEmpty { body += " Shared \(result.sharedSessionIds.count) session(s)." }
+            var body = "Restart running `claude` and reload VS Code's Claude panel; `claude --resume` shows all your sessions."
             body += result.warnings.map { " " + $0 }.joined()
             notify(title: "Now on \(profile.label)", body: body)
+            reload()
+            await refreshUsage(force: true)
         } catch {
             showError(error)
         }
     }
 
-    func captureCurrent(label: String, role: ProfileRole, includeDesktop: Bool) async {
-        isBusy = true
-        defer { isBusy = false; reload() }
-        do {
-            let p = try await switcher.captureCurrent(label: label, role: role, includeDesktop: includeDesktop)
-            notify(title: "Saved \(p.label)", body: p.email)
-        } catch {
-            showError(error)
-        }
-    }
+    // MARK: Usage
 
-    func remove(_ profile: Profile) {
-        guard !isBusy else { return }
-        let alert = NSAlert()
-        alert.messageText = "Remove \(profile.label)?"
-        alert.informativeText = "This deletes the saved login for \(profile.email). You'll need to sign in to it again to re-add it."
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        try? env.secrets.delete(service: ServiceNames.vault(profile.id))
-        try? env.secrets.delete(service: ServiceNames.vaultPrevious(profile.id))
-        try? FileManager.default.removeItem(at: SwitcherEnvironment.switcherRoot.appendingPathComponent("vault/\(profile.id)"))
-        state.profiles.removeAll { $0.id == profile.id }
-        if state.activeId == profile.id { state.activeId = nil }
-        persist()
-    }
-
-    private func persist() {
-        do { try env.store.save(state) } catch { showError(error) }
+    func refreshUsage(force: Bool) async {
+        guard force || Date().timeIntervalSince(lastUsageRefresh) >= 60, !isRefreshing else { return }
+        isRefreshing = true
+        lastUsageRefresh = Date()
+        usage = await usageService.refresh()
+        isRefreshing = false
         reload()
     }
+
+    // MARK: Settings
+
+    func setOpenAtLogin(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            showError(error)
+        }
+        openAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    // MARK: Feedback
 
     private func showError(_ error: Error) {
         let alert = NSAlert()
         switch error {
         case SwitchError.stepFailed(let step, let underlying):
-            alert.messageText = "Switch failed at: \(step)"
+            alert.messageText = "Failed at: \(step)"
             alert.informativeText = "You are still on your previous account; its login was put back.\n\n\(underlying)"
         case SwitchError.rollbackIncomplete(let step, let failures):
             alert.messageText = "Switch failed at: \(step), and some things could not be put back"
             alert.informativeText = "Check these before using Claude:\n• " + failures.joined(separator: "\n• ")
         case SwitchError.loginMismatch(let active, let owner):
             alert.messageText = "Login mismatch — switch stopped"
-            alert.informativeText = "~/.claude.json says \(active), but the Claude Code login in the Keychain is \(owner)'s. A running claude probably wrote it back. Quit all claude processes, run `claude` → /login as \(active), then try again. Nothing was changed."
+            alert.informativeText = "~/.claude.json says \(active), but the Claude Code login in the Keychain is \(owner)'s. A running claude probably wrote it back. Quit all claude processes, run `claude auth login` as \(active), then try again. Nothing was changed."
         case SwitchError.noLiveLogin:
             alert.messageText = "No Claude Code login found"
-            alert.informativeText = "Sign in with `claude` then `/login` first."
+            alert.informativeText = "Use Add account to sign in."
         case SwitchError.missingSecret(let label):
             alert.messageText = "Saved login for \(label) is missing"
-            alert.informativeText = "Sign in to that account again and use Save current login."
+            alert.informativeText = "Remove it and add it again by signing in."
         case SwitchError.alreadyActive:
             alert.messageText = "That account is already active"
         default:
@@ -126,7 +264,6 @@ final class AppModel: ObservableObject {
     }
 
     private func notify(title: String, body: String) {
-        // UNUserNotificationCenter needs a real app bundle; under `swift run` fall back to nothing.
         guard Bundle.main.bundleIdentifier != nil else { print("\(title): \(body)"); return }
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert]) { _, _ in }
