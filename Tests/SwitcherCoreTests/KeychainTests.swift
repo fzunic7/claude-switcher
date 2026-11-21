@@ -98,3 +98,45 @@ final class RecordingRunner: CommandRunner, @unchecked Sendable {
         #expect(try store.read(service: "s") == nil)
     }
 }
+
+@Suite struct KeychainAccountTests {
+    let attrs = """
+    attributes:
+        "acct"<blob>="frane"
+        "svce"<blob>="Claude Code-credentials"
+    """
+
+    @Test func readUsesTheConfiguredAccount() throws {
+        let runner = RecordingRunner()
+        runner.responses = [(0, attrs), (0, "real\n")]
+        let store = SecurityCLIStore(runner: runner, accounts: [ServiceNames.claudeCode: "frane"])
+        #expect(try store.read(service: ServiceNames.claudeCode)?.secret == Data("real".utf8))
+        #expect(runner.calls[0].args == ["find-generic-password", "-s", "Claude Code-credentials", "-a", "frane"])
+        #expect(runner.calls[1].args == ["find-generic-password", "-s", "Claude Code-credentials", "-a", "frane", "-w"])
+    }
+
+    @Test func writeUsesTheConfiguredAccountWhateverIsPassed() throws {
+        let runner = RecordingRunner()
+        runner.responses = [(0, ""), (0, attrs), (0, "ab\n")]
+        let store = SecurityCLIStore(runner: runner, accounts: [ServiceNames.claudeCode: "frane"])
+        try store.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("ab".utf8))
+        #expect(runner.calls[0].stdin == "add-generic-password -U -s \"Claude Code-credentials\" -a \"frane\" -X 6162\n")
+    }
+
+    @Test func liveStoreUsesTheMacUserNameForClaudeCode() {
+        #expect(SecurityCLIStore.live().accounts[ServiceNames.claudeCode] == NSUserName())
+    }
+
+    @Test func realKeychainPicksTheRightOfTwoSameNamedItems() throws {
+        let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
+        let plain = SecurityCLIStore(runner: ProcessRunner())
+        let scoped = SecurityCLIStore(runner: ProcessRunner(), accounts: [service: "real-user"])
+        defer {
+            _ = try? ProcessRunner().run("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", "stub"])
+            _ = try? ProcessRunner().run("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", "real-user"])
+        }
+        try plain.write(service: service, account: "stub", secret: Data("stub".utf8))
+        try scoped.write(service: service, account: "ignored", secret: Data("real".utf8))
+        #expect(try scoped.read(service: service)?.secret == Data("real".utf8))
+    }
+}

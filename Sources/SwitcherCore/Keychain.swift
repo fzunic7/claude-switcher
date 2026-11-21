@@ -26,15 +26,26 @@ public struct SecurityCLIStore: SecretStore {
     static let notFound: Int32 = 44
     static let interactiveLineLimit = 3500
     let runner: CommandRunner
+    /// Services whose items must be addressed by a fixed account name (several items can share a service).
+    public let accounts: [String: String]
 
-    public init(runner: CommandRunner = ProcessRunner()) { self.runner = runner }
+    public init(runner: CommandRunner = ProcessRunner(), accounts: [String: String] = [:]) {
+        self.runner = runner; self.accounts = accounts
+    }
+
+    /// Claude Code keeps its login under the macOS user name; older versions left a stub under another name.
+    public static func live() -> SecurityCLIStore {
+        SecurityCLIStore(accounts: [ServiceNames.claudeCode: NSUserName()])
+    }
+
+    private func scope(_ service: String) -> [String] { accounts[service].map { ["-a", $0] } ?? [] }
 
     public func read(service: String) throws -> (account: String, secret: Data)? {
-        let attrs = try runner.run(Self.tool, ["find-generic-password", "-s", service])
+        let attrs = try runner.run(Self.tool, ["find-generic-password", "-s", service] + scope(service))
         if attrs.status == Self.notFound { return nil }
         guard attrs.status == 0 else { throw KeychainError.commandFailed(status: attrs.status) }
         let account = Self.parseAccount(String(decoding: attrs.stdout, as: UTF8.self)) ?? ""
-        let pw = try runner.run(Self.tool, ["find-generic-password", "-s", service, "-w"])
+        let pw = try runner.run(Self.tool, ["find-generic-password", "-s", service] + scope(service) + ["-w"])
         if pw.status == Self.notFound { return nil }
         guard pw.status == 0 else { throw KeychainError.commandFailed(status: pw.status) }
         var secret = pw.stdout
@@ -42,7 +53,8 @@ public struct SecurityCLIStore: SecretStore {
         return (account, secret)
     }
 
-    public func write(service: String, account: String, secret: Data) throws {
+    public func write(service: String, account requested: String, secret: Data) throws {
+        let account = accounts[service] ?? requested
         for name in [service, account] where name.contains("\"") || name.contains("\n") {
             throw KeychainError.invalidName(name)
         }
@@ -60,7 +72,7 @@ public struct SecurityCLIStore: SecretStore {
     }
 
     public func delete(service: String) throws {
-        let result = try runner.run(Self.tool, ["delete-generic-password", "-s", service])
+        let result = try runner.run(Self.tool, ["delete-generic-password", "-s", service] + scope(service))
         guard result.status == 0 || result.status == Self.notFound else {
             throw KeychainError.commandFailed(status: result.status)
         }

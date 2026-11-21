@@ -67,9 +67,19 @@ public final class AccountWatcher: @unchecked Sendable {
         }
 
         if case .known(let id) = resolved {
+            let hadSavedLogin = try env.secrets.read(service: ServiceNames.vault(id)) != nil
             try switcher.repairOtherCopies(of: live.secret, owner: id)
             try switcher.saveVault(id, account: live.account, secret: live.secret)   // keep its saved copy fresh
-            if isAdding && id != returnTo { cancelAdd() }   // signed in to an account we already have
+            if isAdding && id != returnTo {
+                let previous = returnTo
+                cancelAdd()
+                // Its saved login was missing, so this sign-in re-added it: go back like any other add.
+                if !hadSavedLogin, let previous, let profile = try env.store.load().profile(id),
+                   try env.secrets.read(service: ServiceNames.vault(previous)) != nil {
+                    try switcher.switchCLI(to: previous)
+                    return .addedAndRestored(added: profile, restored: previous)
+                }
+            }
             state = try env.store.load()
             if state.activeId != id {
                 state.activeId = id

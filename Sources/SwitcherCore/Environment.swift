@@ -38,7 +38,7 @@ public extension SwitcherEnvironment {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return SwitcherEnvironment(
             store: ProfileStore(root: switcherRoot),
-            secrets: SecurityCLIStore(),
+            secrets: SecurityCLIStore.live(),
             claudeJSON: ClaudeJSON(url: home.appendingPathComponent(".claude.json")),
             desktopLogin: DesktopLoginFiles(supportRoot: desktopSupportRoot, vaultRoot: switcherRoot.appendingPathComponent("vault")),
             sessions: SessionIndex(sessionsRoot: desktopSupportRoot.appendingPathComponent("claude-code-sessions")),

@@ -298,3 +298,20 @@ import Testing
         #expect(try w.env.store.load().ignoredAccountId == nil)
     }
 }
+
+@Suite struct ReAddMissingLoginTests {
+    @Test func signingInToAnAccountWhoseSavedLoginIsMissingIsAReAdd() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        _ = try await Switcher(env: w.env).switchTo("A")             // live A
+        try w.secrets.delete(service: ServiceNames.vault("B"))       // B's saved login is gone
+        let watcher = AccountWatcher(env: w.env)
+        try watcher.beginAdd()
+        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-B-fresh".utf8))
+        let event = try await watcher.check()
+        guard case .addedAndRestored(let added, let restored) = event else { Issue.record("got \(event)"); return }
+        #expect(added.id == "B" && restored == "A")
+        #expect(try w.vaultToken("B") == "tok-B-fresh")
+        #expect(try w.liveToken() == "tok-A")
+    }
+}
