@@ -23,7 +23,7 @@ public final class AccountWatcher: @unchecked Sendable {
     /// Call right before starting a sign-in. Saves the current login first, because the sign-in replaces it.
     public func beginAdd() throws {
         try switcher.saveLiveLoginBack()
-        returnTo = try env.claudeJSON.readAccount()?["accountUuid"]?.stringValue
+        returnTo = try env.liveKnownId(try env.store.load())
         isAdding = true
     }
 
@@ -31,10 +31,10 @@ public final class AccountWatcher: @unchecked Sendable {
     public func abandonAdd() throws {
         let previous = returnTo
         cancelAdd()
-        guard let previous, try env.store.load().profile(previous) != nil else { return }
-        let liveId = (try? env.claudeJSON.readAccount())?["accountUuid"]?.stringValue
-        let live = try env.secrets.read(service: ServiceNames.claudeCode)
-        if live == nil || liveId != previous { try switcher.switchCLI(to: previous) }
+        let state = try env.store.load()
+        guard let previous, state.profile(previous) != nil else { return }
+        let liveId = try? env.liveKnownId(state)
+        if liveId != previous { try switcher.switchCLI(to: previous) }
     }
 
     public func cancelAdd() {
@@ -44,28 +44,36 @@ public final class AccountWatcher: @unchecked Sendable {
 
     public func check() async throws -> WatchEvent {
         if signInInProgress { return .none }
-        guard let account = try? env.claudeJSON.readAccount(), let liveId = account["accountUuid"]?.stringValue,
-              let live = try env.secrets.read(service: ServiceNames.claudeCode) else { return .none }
+        guard let live = try env.secrets.read(service: ServiceNames.claudeCode) else { return .none }
         var state = try env.store.load()
+        // No answer from `claude auth status` means we don't know whose login it is: do nothing.
+        guard let resolved = try? env.resolveLive(state) else { return .none }
+
+        let liveId: String
+        switch resolved {
+        case .signedOut, .unresolved: return .none
+        case .known(let id): liveId = id
+        case .new(let id, _): liveId = id
+        }
         if let ignored = state.ignoredAccountId, ignored != liveId {
             state.ignoredAccountId = nil
             try env.store.save(state)
         }
-        // A half-written sign-in: ~/.claude.json names one account while the Keychain still holds another
-        // saved account's token. Wait until both agree.
-        for other in state.profiles where other.id != liveId {
-            if try env.secrets.read(service: ServiceNames.vault(other.id))?.secret == live.secret { return .none }
-        }
-        if state.profile(liveId) != nil {
-            if isAdding && liveId != returnTo { cancelAdd() }   // signed in to an account we already have
-            if state.activeId != liveId {
-                state.activeId = liveId
+
+        if case .known(let id) = resolved {
+            try switcher.repairOtherCopies(of: live.secret, owner: id)
+            try switcher.saveVault(id, account: live.account, secret: live.secret)   // keep its saved copy fresh
+            if isAdding && id != returnTo { cancelAdd() }   // signed in to an account we already have
+            state = try env.store.load()
+            if state.activeId != id {
+                state.activeId = id
                 try env.store.save(state)
-                return .activeChanged(liveId)
+                return .activeChanged(id)
             }
             return .none
         }
         if state.ignoredAccountId == liveId { return .none }
+        guard case .new(_, let account) = resolved else { return .none }
 
         let email = account["emailAddress"]?.stringValue ?? liveId
         let label = email.split(separator: "@").first.map(String.init) ?? email

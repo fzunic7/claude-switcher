@@ -45,12 +45,30 @@ final class FakeDesktopAccount: DesktopAccountReading, @unchecked Sendable {
     func signedInAccount() -> (id: String, modifiedAt: Date)? { id.map { ($0, modifiedAt) } }
 }
 
+/// Mimics `claude auth status`: reports the owner of whatever token is in the live Keychain item.
+/// Test tokens look like "tok-<id>" or "tok-<id>-<suffix>".
+final class FakeIdentity: LiveIdentity, @unchecked Sendable {
+    let secrets: SecretStore
+    var emails: [String: String] = [:]
+    var failing = false
+    init(secrets: SecretStore) { self.secrets = secrets }
+    func current() throws -> LiveLogin? {
+        if failing { throw SwitchError.stepFailed(step: "auth status", underlying: "boom") }
+        guard let secret = try secrets.read(service: ServiceNames.claudeCode)?.secret else { return nil }
+        let token = String(decoding: secret, as: UTF8.self)
+        guard token.hasPrefix("tok-") else { return nil }
+        let id = String(token.dropFirst(4).split(separator: "-").first ?? "")
+        return LiveLogin(email: emails[id] ?? "\(id)@x", orgId: "org-\(id)")
+    }
+}
+
 /// Two accounts, A (main) and B (backup), on a temp filesystem with an in-memory keychain.
 final class World {
     let base: URL
     let secrets = InMemorySecretStore()
     let desktop: FakeDesktop
     let desktopAccount = FakeDesktopAccount()
+    lazy var identity = FakeIdentity(secrets: secrets)
     let claudeJSONURL: URL
     let support: URL
     var desktopLogin: DesktopLoginStore
@@ -70,7 +88,7 @@ final class World {
         SwitcherEnvironment(store: ProfileStore(root: base.appendingPathComponent("switcher")), secrets: secrets,
                             claudeJSON: ClaudeJSON(url: claudeJSONURL), desktopLogin: desktopLogin,
                             sessions: SessionIndex(sessionsRoot: support.appendingPathComponent("claude-code-sessions")),
-                            desktop: desktop, desktopAccount: desktopAccount)
+                            desktop: desktop, desktopAccount: desktopAccount, identity: identity)
     }
 
     func signIn(_ id: String, token: String) throws {
@@ -260,14 +278,12 @@ final class World {
         #expect(running.desktop.isRunning)
     }
 
-    @Test func switchRefusesWhenLiveTokenBelongsToAnotherProfile() async throws {
+    @Test func staleAccountFileDoesNotFoolTheSwitch() async throws {
         let w = try World()
         try await w.captureBoth()
-        // ~/.claude.json says B, but a still-running claude wrote A's token into the Keychain.
+        // ~/.claude.json says B (a running claude wrote it), but the live login is A's.
         try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-A".utf8))
-        await #expect(throws: SwitchError.loginMismatch(active: "Backup", tokenOwner: "Main")) {
-            _ = try await Switcher(env: w.env).switchTo("A")
-        }
+        await #expect(throws: SwitchError.alreadyActive) { _ = try await Switcher(env: w.env).switchTo("A") }
         #expect(try w.vaultToken("B") == "tok-B")
         #expect(try w.vaultToken("A") == "tok-A")
     }
@@ -275,11 +291,11 @@ final class World {
     @Test func saveBackKeepsPreviousVaultCopy() async throws {
         let w = try World()
         try await w.captureBoth()
-        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-B2".utf8))
+        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-B-2".utf8))
         _ = try await Switcher(env: w.env).switchTo("A")
         let prev = try w.secrets.read(service: ServiceNames.vaultPrevious("B")).map { String(decoding: $0.secret, as: UTF8.self) }
         #expect(prev == "tok-B")
-        #expect(try w.vaultToken("B") == "tok-B2")
+        #expect(try w.vaultToken("B") == "tok-B-2")
     }
 
     @Test func desktopCaptureFailureRelaunchesDesktopAndChangesNothing() async throws {

@@ -14,6 +14,8 @@ public enum SwitchError: Error, Equatable {
     case stepFailed(step: String, underlying: String)
     /// The Keychain holds a token saved for another profile while ~/.claude.json names `active`.
     case loginMismatch(active: String, tokenOwner: String)
+    /// Claude Code is signed in to an account that isn't saved yet.
+    case unsavedLiveLogin(email: String)
     /// A step failed and putting things back also failed for the listed parts.
     case rollbackIncomplete(step: String, failures: [String])
 }
@@ -25,10 +27,17 @@ public final class Switcher: @unchecked Sendable {
 
     /// Saves the currently signed-in Claude Code login (and optionally Claude Desktop's) as a profile.
     public func captureCurrent(label: String, role: ProfileRole, includeDesktop: Bool) async throws -> Profile {
-        guard let live = try env.secrets.read(service: ServiceNames.claudeCode),
-              let account = try env.claudeJSON.readAccount(),
-              let id = account["accountUuid"]?.stringValue else { throw SwitchError.noLiveLogin }
-        try env.secrets.write(service: ServiceNames.vault(id), account: live.account, secret: live.secret)
+        guard let live = try env.secrets.read(service: ServiceNames.claudeCode) else { throw SwitchError.noLiveLogin }
+        let account: [String: JSONValue], id: String
+        switch try env.resolveLive(try env.store.load()) {
+        case .new(let newId, let newAccount): (id, account) = (newId, newAccount)
+        case .known(let knownId):
+            guard let saved = try env.store.load().profile(knownId) else { throw SwitchError.noLiveLogin }
+            (id, account) = (knownId, saved.oauthAccount)
+        case .signedOut, .unresolved: throw SwitchError.noLiveLogin
+        }
+        try repairOtherCopies(of: live.secret, owner: id)
+        try saveVault(id, account: live.account, secret: live.secret)
 
         var state = try env.store.load()
         var hasDesktop = state.profile(id)?.hasDesktopSnapshot ?? false
@@ -53,29 +62,26 @@ public final class Switcher: @unchecked Sendable {
     public func switchTo(_ targetId: String) async throws -> SwitchResult {
         let state = try env.store.load()
         guard let target = state.profile(targetId) else { throw SwitchError.unknownProfile(targetId) }
-        let liveAccount = try env.claudeJSON.readAccount()
-        let liveSecret = try env.secrets.read(service: ServiceNames.claudeCode)
-        var currentId = liveAccount?["accountUuid"]?.stringValue ?? state.activeId
-        if currentId == targetId {
-            // Already on it — unless the live login is gone (e.g. a cancelled sign-in); then restore it.
-            guard liveSecret == nil || liveAccount == nil else { throw SwitchError.alreadyActive }
-            currentId = nil
+        let resolved = try env.resolveLive(state)
+        let currentId: String?
+        switch resolved {
+        case .known(let id): currentId = id
+        case .signedOut: currentId = nil      // e.g. after a cancelled sign-in: just put the target back
+        case .new(_, let account):
+            throw SwitchError.unsavedLiveLogin(email: account["emailAddress"]?.stringValue ?? "the current account")
+        case .unresolved(let email): throw SwitchError.unsavedLiveLogin(email: email)
         }
+        if currentId == targetId { throw SwitchError.alreadyActive }
+        let liveAccount = currentId.flatMap { state.profile($0) }?.oauthAccount
         guard let targetSecret = try env.secrets.read(service: ServiceNames.vault(targetId)) else {
             throw SwitchError.missingSecret(target.label)
         }
         let live = try env.secrets.read(service: ServiceNames.claudeCode)
         var current = currentId.flatMap { state.profile($0) }
 
-        // 0. Refuse if the live token is one we saved for a different profile: ~/.claude.json and the
-        //    Keychain disagree (e.g. a still-running claude wrote its old account back).
-        if let live, let profile = current {
-            for other in state.profiles where other.id != profile.id {
-                if try env.secrets.read(service: ServiceNames.vault(other.id))?.secret == live.secret {
-                    throw SwitchError.loginMismatch(active: profile.label, tokenOwner: other.label)
-                }
-            }
-        }
+        // 0. The live login is verified to be the current account's, so any other account holding the same
+        //    login has a wrong copy (from an earlier mix-up) — remove it rather than ever restoring it.
+        if let live, let profile = current { try repairOtherCopies(of: live.secret, owner: profile.id) }
 
         // 1. The live login always wins: save it back into the current profile (keeping the old copy).
         if var profile = current {
@@ -191,15 +197,22 @@ public final class Switcher: @unchecked Sendable {
         try env.store.save(state)
     }
 
-    /// Saves the live Claude Code login into its saved account, if that account is saved here.
+    /// Saves the live Claude Code login into the saved account it belongs to (per `claude auth status`).
     public func saveLiveLoginBack() throws {
         let state = try env.store.load()
-        guard let id = try env.claudeJSON.readAccount()?["accountUuid"]?.stringValue, state.profile(id) != nil,
+        guard let id = try env.liveKnownId(state),
               let live = try env.secrets.read(service: ServiceNames.claudeCode) else { return }
-        for other in state.profiles where other.id != id {
-            if try env.secrets.read(service: ServiceNames.vault(other.id))?.secret == live.secret { return }
-        }
+        try repairOtherCopies(of: live.secret, owner: id)
         try saveVault(id, account: live.account, secret: live.secret)
+    }
+
+    /// Deletes copies of `secret` saved under accounts other than its verified owner.
+    func repairOtherCopies(of secret: Data, owner: String) throws {
+        for other in try env.store.load().profiles where other.id != owner {
+            if try env.secrets.read(service: ServiceNames.vault(other.id))?.secret == secret {
+                try env.secrets.delete(service: ServiceNames.vault(other.id))
+            }
+        }
     }
 
     /// Forgets a saved account: its saved logins (Claude Code and Desktop) are deleted.
@@ -227,7 +240,7 @@ public final class Switcher: @unchecked Sendable {
         return config?.id
     }
 
-    private func saveVault(_ id: String, account: String, secret: Data) throws {
+    func saveVault(_ id: String, account: String, secret: Data) throws {
         if let existing = try env.secrets.read(service: ServiceNames.vault(id)), existing.secret != secret {
             try env.secrets.write(service: ServiceNames.vaultPrevious(id), account: existing.account, secret: existing.secret)
         }
