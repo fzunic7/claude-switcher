@@ -9,11 +9,11 @@ import Testing
                                   fetchedAt: Date(), isLive: true)
 
     @Test func remainingIsDefaultStyle() {
-        #expect(UsageDisplay.menuBarTitle(label: "frane", usage: used30, mode: .remaining) == "frane 70% left")
+        #expect(UsageDisplay.menuBarTitle(label: "me", usage: used30, mode: .remaining) == "me 70% left")
     }
 
     @Test func usedStyle() {
-        #expect(UsageDisplay.menuBarTitle(label: "frane", usage: used30, mode: .used) == "frane 30% used")
+        #expect(UsageDisplay.menuBarTitle(label: "me", usage: used30, mode: .used) == "me 30% used")
     }
 
     @Test func sessionNotStartedCountsAsZeroUsed() {

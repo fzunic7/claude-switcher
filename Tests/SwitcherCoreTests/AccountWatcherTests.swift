@@ -232,9 +232,9 @@ import Testing
 
     @Test func loginSavedUnderWrongAccountIsRepaired() async throws {
         let w = try World()
-        // The bug's aftermath: "frane" (F) holds X's login; X is live and the account file agrees.
+        // The bug's aftermath: "me" (F) holds X's login; X is live and the account file agrees.
         var state = SwitcherState()
-        state.profiles = [Profile(id: "F", label: "frane", role: .main, orgUuid: "org-F", email: "F@x",
+        state.profiles = [Profile(id: "F", label: "me", role: .main, orgUuid: "org-F", email: "F@x",
                                   oauthAccount: ["accountUuid": .string("F")], hasDesktopSnapshot: false)]
         state.activeId = "F"
         try w.env.store.save(state)

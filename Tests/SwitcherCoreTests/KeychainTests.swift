@@ -102,25 +102,25 @@ final class RecordingRunner: CommandRunner, @unchecked Sendable {
 @Suite struct KeychainAccountTests {
     let attrs = """
     attributes:
-        "acct"<blob>="frane"
+        "acct"<blob>="me"
         "svce"<blob>="Claude Code-credentials"
     """
 
     @Test func readUsesTheConfiguredAccount() throws {
         let runner = RecordingRunner()
         runner.responses = [(0, attrs), (0, "real\n")]
-        let store = SecurityCLIStore(runner: runner, accounts: [ServiceNames.claudeCode: "frane"])
+        let store = SecurityCLIStore(runner: runner, accounts: [ServiceNames.claudeCode: "me"])
         #expect(try store.read(service: ServiceNames.claudeCode)?.secret == Data("real".utf8))
-        #expect(runner.calls[0].args == ["find-generic-password", "-s", "Claude Code-credentials", "-a", "frane"])
-        #expect(runner.calls[1].args == ["find-generic-password", "-s", "Claude Code-credentials", "-a", "frane", "-w"])
+        #expect(runner.calls[0].args == ["find-generic-password", "-s", "Claude Code-credentials", "-a", "me"])
+        #expect(runner.calls[1].args == ["find-generic-password", "-s", "Claude Code-credentials", "-a", "me", "-w"])
     }
 
     @Test func writeUsesTheConfiguredAccountWhateverIsPassed() throws {
         let runner = RecordingRunner()
         runner.responses = [(0, ""), (0, attrs), (0, "ab\n")]
-        let store = SecurityCLIStore(runner: runner, accounts: [ServiceNames.claudeCode: "frane"])
+        let store = SecurityCLIStore(runner: runner, accounts: [ServiceNames.claudeCode: "me"])
         try store.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("ab".utf8))
-        #expect(runner.calls[0].stdin == "add-generic-password -U -s \"Claude Code-credentials\" -a \"frane\" -X 6162\n")
+        #expect(runner.calls[0].stdin == "add-generic-password -U -s \"Claude Code-credentials\" -a \"me\" -X 6162\n")
     }
 
     @Test func liveStoreUsesTheMacUserNameForClaudeCode() {
@@ -156,10 +156,10 @@ func deleteAll(_ service: String) {
         defer { deleteAll(service) }
         _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "unknown", "-w", "old"])
         let store = SecurityCLIStore(runner: ProcessRunner())
-        try store.write(service: service, account: "frane", secret: Data("new".utf8))
+        try store.write(service: service, account: "me", secret: Data("new".utf8))
         #expect(try store.read(service: service)?.secret == Data("new".utf8))
         #expect(!count(service, account: "unknown"))
-        #expect(!count(service, account: "frane"))
+        #expect(!count(service, account: "me"))
         #expect(count(service, account: SecurityCLIStore.ownAccount))
     }
 
@@ -174,7 +174,7 @@ func deleteAll(_ service: String) {
         let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
         defer { deleteAll(service) }
         _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "unknown", "-w", "a"])
-        _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "frane", "-w", "b"])
+        _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "me", "-w", "b"])
         try SecurityCLIStore(runner: ProcessRunner()).delete(service: service)
         #expect(try SecurityCLIStore(runner: ProcessRunner()).read(service: service) == nil)
     }
