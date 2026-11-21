@@ -42,6 +42,15 @@ final class AppModel: ObservableObject {
     @Published var setupHidden = UserDefaults.standard.bool(forKey: "setupHidden") {
         didSet { UserDefaults.standard.set(setupHidden, forKey: "setupHidden") }
     }
+    @Published var lowUsageAlerts = UserDefaults.standard.object(forKey: "lowUsageAlerts") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(lowUsageAlerts, forKey: "lowUsageAlerts") }
+    }
+    /// Limit windows already announced (see `LowUsageAlert.Alert.key`).
+    private var announcedKeys: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "announcedLowUsage") ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.suffix(50)), forKey: "announcedLowUsage") }
+    }
+    private let notifications = NotificationHandler()
     @Published var autoSwitch = UserDefaults.standard.bool(forKey: "autoSwitch") {
         didSet { UserDefaults.standard.set(autoSwitch, forKey: "autoSwitch") }
     }
@@ -99,8 +108,10 @@ final class AppModel: ObservableObject {
 
     init() {
         isDemo = false
+        installNotifications()
         reload()
         refreshSetupFacts()
+        notifications.model = self
         DispatchQueue.main.async { [appearance] in NSApp.appearance = appearance.nsAppearance }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tick() }
@@ -323,7 +334,37 @@ final class AppModel: ObservableObject {
         usage = await usageService.refresh()
         isRefreshing = false
         reload()
+        alertIfLow()
         await autoSwitchIfNeeded()
+    }
+
+    private func installNotifications() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        notifications.install()
+    }
+
+    private func alertIfLow() {
+        guard lowUsageAlerts, !isDemo, let active,
+              let alert = LowUsageAlert.check(accountId: active.id, usage: usage[active.id], now: Date()),
+              !announcedKeys.contains(alert.key) else { return }
+        announcedKeys.append(alert.key)
+        let what = alert.window == .session ? "5-hour session" : "weekly limit"
+        var body = "\(Int(alert.left.rounded()))% of the \(what) left."
+        var userInfo: [String: String] = [:]
+        if let targetId = AutoSwitch.bestTarget(activeId: active.id, candidates: state.profiles, usage: usage, now: Date()),
+           let target = state.profile(targetId) {
+            let targetLeft = Int(AutoSwitch.left(usage[targetId]?.session, Date()).rounded())
+            body += " \(target.label) has \(targetLeft)% left — click Switch to move to it."
+            userInfo["targetId"] = targetId
+        }
+        notify(title: "\(active.label) is running low", body: body,
+               category: userInfo.isEmpty ? nil : NotificationHandler.lowUsageCategory, userInfo: userInfo)
+    }
+
+    /// Entry point for the notification's Switch button.
+    func switchTo(accountId: String) async {
+        guard let profile = state.profile(accountId) else { return }
+        await switchTo(profile)
     }
 
     private func autoSwitchIfNeeded() async {
@@ -387,13 +428,15 @@ final class AppModel: ObservableObject {
         alert.runModal()
     }
 
-    private func notify(title: String, body: String) {
+    private func notify(title: String, body: String, category: String? = nil, userInfo: [String: String] = [:]) {
         guard Bundle.main.bundleIdentifier != nil else { print("\(title): \(body)"); return }
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert]) { _, _ in }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        if let category { content.categoryIdentifier = category }
+        content.userInfo = userInfo
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 }

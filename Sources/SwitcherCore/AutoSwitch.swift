@@ -16,6 +16,12 @@ public enum AutoSwitch {
         let nearlyOut = left(active.session, now) <= triggerLeft || left(active.weekly, now) <= triggerLeft
         guard nearlyOut else { return nil }
 
+        return bestTarget(activeId: activeId, candidates: candidates, usage: usage, now: now)
+    }
+
+    /// The other account with the most session left (at least `minimumTargetLeft`, weekly not exhausted).
+    public static func bestTarget(activeId: String, candidates: [Profile], usage: [String: AccountUsage],
+                                  now: Date) -> String? {
         let options = candidates.filter { $0.id != activeId }.compactMap { p -> (String, Double)? in
             guard let u = usage[p.id] else { return nil }
             let session = left(u.session, now)
@@ -26,7 +32,7 @@ public enum AutoSwitch {
     }
 
     /// % left in a window; a window whose reset time has passed (or that hasn't started) is full.
-    static func left(_ window: UsageWindow?, _ now: Date) -> Double {
+    public static func left(_ window: UsageWindow?, _ now: Date) -> Double {
         guard let window else { return 100 }
         if let reset = window.resetsAt, reset <= now { return 100 }
         return max(0, 100 - window.utilization)

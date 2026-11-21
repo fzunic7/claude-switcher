@@ -173,6 +173,11 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Card {
+                Toggle("Notify me when 10% is left", isOn: $model.lowUsageAlerts)
+                Text("One notification per limit, with a Switch button when another account has room.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Card {
                 Toggle("Switch automatically when 5% is left", isOn: $model.autoSwitch)
                 Text("When the active account's session or weekly limit drops to 5% left, switch to the account with the most left (at least 20%). Claude Desktop restarts; running `claude` needs a restart.")
                     .font(.caption).foregroundStyle(.secondary)
