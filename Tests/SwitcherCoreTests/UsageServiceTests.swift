@@ -134,3 +134,33 @@ final class UsageWorld {
         #expect(result["A"] != nil)
     }
 }
+
+@Suite struct UsageServiceMoreTests {
+    @Test func activeAccountComesFromSavedStateNotAccountFile() async throws {
+        let w = try UsageWorld()
+        try Data(#"{"oauthAccount":{"accountUuid":"B"}}"#.utf8).write(to: w.claudeJSONURL)   // stale file
+        w.http.responses["tok-A"] = (200, w.usageJSON(42))
+        w.http.responses["tok-B"] = (200, w.usageJSON(5))
+        let result = await w.service.refresh()
+        // A is active in state; B's numbers must come from B's own saved login, not the live one.
+        #expect(result["B"]?.session?.utilization == 5)
+        #expect(result["A"]?.session?.utilization == 42)
+    }
+
+    @Test func rateLimitedFallsBackToLastKnown() async throws {
+        let w = try UsageWorld()
+        try w.setLastUsage("B", session: 12, at: Date(timeIntervalSince1970: 1_700_000_000))
+        w.http.responses["tok-A"] = (200, w.usageJSON(42))
+        w.http.responses["tok-B"] = (429, "{}")
+        let result = await w.service.refresh()
+        #expect(result["B"]?.session?.utilization == 12 && result["B"]?.isLive == false)
+    }
+
+    @Test func networkErrorFallsBackToLastKnown() async throws {
+        let w = try UsageWorld()
+        try w.setLastUsage("A", session: 9, at: Date(timeIntervalSince1970: 1_700_000_000))
+        // no responses registered → FakeHTTP throws a network error
+        let result = await w.service.refresh()
+        #expect(result["A"]?.session?.utilization == 9 && result["A"]?.isLive == false)
+    }
+}

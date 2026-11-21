@@ -13,7 +13,11 @@ public extension CommandRunner {
 public struct ProcessRunner: CommandRunner {
     public init() {}
 
+    /// Writing to a child that already exited must not kill the app.
+    private static let ignoreSIGPIPE: Void = { signal(SIGPIPE, SIG_IGN) }()
+
     public func run(_ path: String, _ args: [String], stdin: Data?) throws -> (status: Int32, stdout: Data) {
+        _ = Self.ignoreSIGPIPE
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args

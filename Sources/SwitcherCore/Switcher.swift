@@ -155,7 +155,12 @@ public final class Switcher: @unchecked Sendable {
             fresh.activeId = targetId
             try env.store.save(fresh)
 
-            if wasRunning { try env.desktop.launch() }
+            // The switch is complete; failing to reopen Desktop is only worth a warning.
+            if wasRunning {
+                do { try env.desktop.launch() } catch {
+                    warnings.append("Couldn't reopen Claude Desktop — open it yourself.")
+                }
+            }
             return SwitchResult(to: targetId, sharedSessionIds: shared, warnings: warnings)
         } catch {
             var failures: [String] = []

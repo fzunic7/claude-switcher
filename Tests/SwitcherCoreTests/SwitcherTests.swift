@@ -351,3 +351,22 @@ final class World {
         #expect(state.activeId == "A")
     }
 }
+
+@Suite struct SwitcherLaunchTests {
+    final class NoLaunchDesktop: DesktopAppControl, @unchecked Sendable {
+        var isRunning = true
+        func quit() async throws { isRunning = false }
+        func launch() throws { throw CocoaError(.fileNoSuchFile) }
+    }
+
+    @Test func desktopFailingToReopenIsAWarningNotARollback() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        var env = w.env
+        env.desktop = NoLaunchDesktop()
+        let result = try await Switcher(env: env).switchTo("A")
+        #expect(try w.liveToken() == "tok-A")
+        #expect(result.warnings.contains { $0.contains("reopen Claude Desktop") })
+        #expect(try w.env.store.load().activeId == "A")
+    }
+}

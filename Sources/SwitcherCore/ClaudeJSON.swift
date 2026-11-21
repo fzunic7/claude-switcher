@@ -22,7 +22,7 @@ public struct ClaudeJSON: Sendable {
         let accountData = try JSONEncoder().encode(account)
         root[Self.accountKey] = try JSONSerialization.jsonObject(with: accountData)
         try current.write(to: backupURL, options: .atomic)
-        try FileSystem.writePrivate(try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted]), to: url)
+        try FileSystem.writePrivate(try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .withoutEscapingSlashes]), to: url)
     }
 
     public func rawContents() throws -> Data { try Data(contentsOf: url) }

@@ -91,4 +91,15 @@ let fullUsageJSON = #"{"five_hour":{"utilization":42,"resets_at":"2026-11-21T15:
         #expect(c.isValid(at: Date(timeIntervalSince1970: 1_763_740_800 - 120)))
         #expect(!c.isValid(at: Date(timeIntervalSince1970: 1_763_740_800 - 30)))
     }
+
+    @Test func unknownCurrencyFormatsAsPlainNumber() {
+        let extra = ExtraUsage(isEnabled: true, monthlyLimit: nil, usedCredits: 1240, utilization: nil,
+                               currency: nil, decimalPlaces: 2, spendLimitReached: false)
+        #expect(extra.formatted(1240) == "12.40")
+    }
+
+    @Test func terminalCommandIsQuoted() {
+        let script = LoginLauncher.terminalScript(claudePath: "/Users/a b/it's/claude")
+        #expect(script.contains(#"'/Users/a b/it'\\''s/claude' auth login"#))
+    }
 }

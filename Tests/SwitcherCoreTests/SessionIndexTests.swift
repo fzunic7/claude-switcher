@@ -91,4 +91,14 @@ import Testing
         #expect(!result.toA.contains("local_4"))
         #expect(!fm.fileExists(atPath: root.appendingPathComponent("A/O/local_4.json").path))
     }
+
+    @Test func mergeRefreshesOlderCopyWithNewerRecord() throws {
+        let (root, index) = try setup()                 // A/O local_2 has lastActivityAt 5000
+        let b = root.appendingPathComponent("B/P")
+        try fm.createDirectory(at: b, withIntermediateDirectories: true)
+        try record("old-title", 1000).write(to: b.appendingPathComponent("local_2.json"))
+        let result = try index.merge(("A", "O"), ("B", "P"))
+        #expect(result.toB.contains("local_2"))
+        #expect(try Data(contentsOf: b.appendingPathComponent("local_2.json")) == Data(contentsOf: root.appendingPathComponent("A/O/local_2.json")))
+    }
 }

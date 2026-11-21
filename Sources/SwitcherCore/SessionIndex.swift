@@ -54,7 +54,13 @@ public struct SessionIndex: SessionSharing {
         .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 
-    /// Copies the selected records into the target account's folder; never overwrites. Returns copied ids.
+    private func lastActivity(_ url: URL) -> Double? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONDecoder().decode(Record.self, from: data))?.lastActivityAt
+    }
+
+    /// Copies the selected records into the target account's folder. An existing record is replaced only by a
+    /// newer one (higher `lastActivityAt`); unreadable or newer records are never touched. Returns ids written.
     public func share(ids: Set<String>, from: (String, String), to: (String, String)) throws -> [String] {
         let fm = FileManager.default
         let src = folder(from.0, from.1), dst = folder(to.0, to.1)
@@ -63,10 +69,18 @@ public struct SessionIndex: SessionSharing {
             let source = src.appendingPathComponent("\(id).json")
             let target = dst.appendingPathComponent("\(id).json")
             let tombstone = dst.appendingPathComponent("deleted_\(id).json")   // deleted there: don't bring it back
-            guard fm.fileExists(atPath: source.path), !fm.fileExists(atPath: target.path),
-                  !fm.fileExists(atPath: tombstone.path) else { continue }
-            try fm.createDirectory(at: dst, withIntermediateDirectories: true)
-            try fm.copyItem(at: source, to: target)
+            guard fm.fileExists(atPath: source.path), !fm.fileExists(atPath: tombstone.path) else { continue }
+            if fm.fileExists(atPath: target.path) {
+                // Refresh an older copy (newer title/activity), never a newer or unreadable one.
+                guard let s = lastActivity(source), let t = lastActivity(target), s > t else { continue }
+                let temp = dst.appendingPathComponent(".\(id).json.tmp")
+                try? fm.removeItem(at: temp)
+                try fm.copyItem(at: source, to: temp)
+                _ = try fm.replaceItemAt(target, withItemAt: temp)
+            } else {
+                try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+                try fm.copyItem(at: source, to: target)
+            }
             copied.append(id)
         }
         return copied

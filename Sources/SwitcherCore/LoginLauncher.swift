@@ -25,17 +25,25 @@ public enum LoginLauncher {
         process.standardOutput = log
         process.standardError = log
         process.standardInput = FileHandle.nullDevice
+        process.terminationHandler = { _ in try? log.close() }
         try process.run()
         return process
     }
 
     /// Fallback when the background sign-in can't finish on its own: run it in Terminal.
     public static func openInTerminal() throws {
-        let command = (claudePath() ?? "claude") + " auth login"
-        let script = "tell application \"Terminal\" to do script \"\(command)\"\ntell application \"Terminal\" to activate"
+        let script = terminalScript(claudePath: claudePath() ?? "claude")
         let result = try ProcessRunner().run("/usr/bin/osascript", ["-e", script])
         guard result.status == 0 else {
             throw SwitchError.stepFailed(step: "open Terminal", underlying: "osascript exited with \(result.status)")
         }
+    }
+
+    static func terminalScript(claudePath: String) -> String {
+        let shellQuoted = "'" + claudePath.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let command = (shellQuoted + " auth login")
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "tell application \"Terminal\" to do script \"\(command)\"\ntell application \"Terminal\" to activate"
     }
 }

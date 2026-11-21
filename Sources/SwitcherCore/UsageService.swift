@@ -15,7 +15,8 @@ public final class UsageService: @unchecked Sendable {
 
     public func refresh() async -> [String: AccountUsage] {
         guard let state = try? store.load() else { return [:] }
-        let liveId = (try? claudeJSON.readAccount())?["accountUuid"]?.stringValue
+        // The active account as verified by the watcher (`claude auth status`), not ~/.claude.json.
+        let liveId = state.activeId
         var result: [String: AccountUsage] = [:]
         var fresh: [String: AccountUsage] = [:]
 

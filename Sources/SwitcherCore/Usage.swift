@@ -46,9 +46,10 @@ public extension ExtraUsage {
     /// Formats an amount in minor units, e.g. 1240 with 2 decimal places in EUR → "€12.40".
     func formatted(_ amount: Double) -> String {
         let value = amount / pow(10, Double(decimalPlaces))
+        guard let currency else { return String(format: "%.\(decimalPlaces)f", value) }
         let f = NumberFormatter()
         f.numberStyle = .currency
-        f.currencyCode = currency ?? "USD"
+        f.currencyCode = currency
         f.minimumFractionDigits = decimalPlaces
         f.maximumFractionDigits = decimalPlaces
         return f.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)

@@ -61,4 +61,12 @@ import Testing
         try editor.restore(original)
         #expect(try Data(contentsOf: url) == Data(fixture.utf8))
     }
+
+    @Test func writeAccountDoesNotEscapeSlashes() throws {
+        let url = try makeFile()
+        try ClaudeJSON(url: url).writeAccount(["accountUuid": .string("b")])
+        let text = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+        #expect(text.contains("\"/a\""))
+        #expect(!text.contains("\\/"))
+    }
 }
