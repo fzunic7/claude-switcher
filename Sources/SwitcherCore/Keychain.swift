@@ -38,14 +38,27 @@ public struct SecurityCLIStore: SecretStore {
         SecurityCLIStore(accounts: [ServiceNames.claudeCode: NSUserName()])
     }
 
-    private func scope(_ service: String) -> [String] { accounts[service].map { ["-a", $0] } ?? [] }
+    /// Account name for the app's own items (vault copies).
+    public static let ownAccount = "ClaudeSwitcher"
+
+
+    private func isOwn(_ service: String) -> Bool { accounts[service] == nil && service.hasPrefix("ClaudeSwitcher.") }
 
     public func read(service: String) throws -> (account: String, secret: Data)? {
-        let attrs = try runner.run(Self.tool, ["find-generic-password", "-s", service] + scope(service))
+        if let account = accounts[service] { return try read(service, scope: ["-a", account]) }
+        if isOwn(service) {
+            // Current copies use a fixed account name; older versions saved under other names.
+            if let current = try read(service, scope: ["-a", Self.ownAccount]) { return current }
+        }
+        return try read(service, scope: [])
+    }
+
+    private func read(_ service: String, scope: [String]) throws -> (account: String, secret: Data)? {
+        let attrs = try runner.run(Self.tool, ["find-generic-password", "-s", service] + scope)
         if attrs.status == Self.notFound { return nil }
         guard attrs.status == 0 else { throw KeychainError.commandFailed(status: attrs.status) }
         let account = Self.parseAccount(String(decoding: attrs.stdout, as: UTF8.self)) ?? ""
-        let pw = try runner.run(Self.tool, ["find-generic-password", "-s", service] + scope(service) + ["-w"])
+        let pw = try runner.run(Self.tool, ["find-generic-password", "-s", service] + scope + ["-w"])
         if pw.status == Self.notFound { return nil }
         guard pw.status == 0 else { throw KeychainError.commandFailed(status: pw.status) }
         var secret = pw.stdout
@@ -54,10 +67,13 @@ public struct SecurityCLIStore: SecretStore {
     }
 
     public func write(service: String, account requested: String, secret: Data) throws {
-        let account = accounts[service] ?? requested
+        let own = isOwn(service)
+        let account = accounts[service] ?? (own ? Self.ownAccount : requested)
         for name in [service, account] where name.contains("\"") || name.contains("\n") {
             throw KeychainError.invalidName(name)
         }
+        // The app's own items: exactly one copy, so a lookup can never land on an older one.
+        if own { try deleteAllCopies(service) }
         let hex = secret.map { String(format: "%02x", $0) }.joined()
         let command = "add-generic-password -U -s \"\(service)\" -a \"\(account)\" -X \(hex)\n"
         let result: (status: Int32, stdout: Data)
@@ -72,9 +88,21 @@ public struct SecurityCLIStore: SecretStore {
     }
 
     public func delete(service: String) throws {
-        let result = try runner.run(Self.tool, ["delete-generic-password", "-s", service] + scope(service))
-        guard result.status == 0 || result.status == Self.notFound else {
-            throw KeychainError.commandFailed(status: result.status)
+        if let account = accounts[service] {
+            let result = try runner.run(Self.tool, ["delete-generic-password", "-s", service, "-a", account])
+            guard result.status == 0 || result.status == Self.notFound else {
+                throw KeychainError.commandFailed(status: result.status)
+            }
+            return
+        }
+        try deleteAllCopies(service)
+    }
+
+    private func deleteAllCopies(_ service: String) throws {
+        for _ in 0..<20 {
+            let result = try runner.run(Self.tool, ["delete-generic-password", "-s", service])
+            if result.status == Self.notFound { return }
+            guard result.status == 0 else { throw KeychainError.commandFailed(status: result.status) }
         }
     }
 

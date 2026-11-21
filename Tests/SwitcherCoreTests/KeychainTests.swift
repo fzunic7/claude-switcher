@@ -131,12 +131,51 @@ final class RecordingRunner: CommandRunner, @unchecked Sendable {
         let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
         let plain = SecurityCLIStore(runner: ProcessRunner())
         let scoped = SecurityCLIStore(runner: ProcessRunner(), accounts: [service: "real-user"])
-        defer {
-            _ = try? ProcessRunner().run("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", "stub"])
-            _ = try? ProcessRunner().run("/usr/bin/security", ["delete-generic-password", "-s", service, "-a", "real-user"])
-        }
+        defer { deleteAll(service) }
         try plain.write(service: service, account: "stub", secret: Data("stub".utf8))
         try scoped.write(service: service, account: "ignored", secret: Data("real".utf8))
         #expect(try scoped.read(service: service)?.secret == Data("real".utf8))
+    }
+}
+
+
+/// Removes every Keychain item for a test service, whatever its account name.
+func deleteAll(_ service: String) {
+    for _ in 0..<10 {
+        guard let r = try? ProcessRunner().run("/usr/bin/security", ["delete-generic-password", "-s", service]), r.status == 0 else { return }
+    }
+}
+
+@Suite struct OwnItemTests {
+    func count(_ service: String, account: String) -> Bool {
+        (try? ProcessRunner().run("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account]))?.status == 0
+    }
+
+    @Test func realKeychainWriteReplacesOlderCopiesOfOwnItems() throws {
+        let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
+        defer { deleteAll(service) }
+        _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "unknown", "-w", "old"])
+        let store = SecurityCLIStore(runner: ProcessRunner())
+        try store.write(service: service, account: "frane", secret: Data("new".utf8))
+        #expect(try store.read(service: service)?.secret == Data("new".utf8))
+        #expect(!count(service, account: "unknown"))
+        #expect(!count(service, account: "frane"))
+        #expect(count(service, account: SecurityCLIStore.ownAccount))
+    }
+
+    @Test func realKeychainReadsLegacyCopyWhenNoCurrentOne() throws {
+        let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
+        defer { deleteAll(service) }
+        _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "unknown", "-w", "legacy"])
+        #expect(try SecurityCLIStore(runner: ProcessRunner()).read(service: service)?.secret == Data("legacy".utf8))
+    }
+
+    @Test func realKeychainDeleteRemovesEveryCopy() throws {
+        let service = "ClaudeSwitcher.test-\(UUID().uuidString)"
+        defer { deleteAll(service) }
+        _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "unknown", "-w", "a"])
+        _ = try ProcessRunner().run("/usr/bin/security", ["add-generic-password", "-s", service, "-a", "frane", "-w", "b"])
+        try SecurityCLIStore(runner: ProcessRunner()).delete(service: service)
+        #expect(try SecurityCLIStore(runner: ProcessRunner()).read(service: service) == nil)
     }
 }
