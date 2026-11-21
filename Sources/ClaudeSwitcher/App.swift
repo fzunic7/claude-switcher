@@ -4,6 +4,10 @@ import SwiftUI
 struct ClaudeSwitcherApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        Screenshots.renderIfRequested()
+    }
+
     var body: some Scene {
         MenuBarExtra {
             PanelView(model: model)

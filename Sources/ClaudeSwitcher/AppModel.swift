@@ -39,6 +39,12 @@ final class AppModel: ObservableObject {
     @Published var menuBarMode: UsageDisplayMode = UsageDisplayMode(rawValue: UserDefaults.standard.string(forKey: "menuBarMode") ?? "") ?? .remaining {
         didSet { UserDefaults.standard.set(menuBarMode.rawValue, forKey: "menuBarMode") }
     }
+    @Published var setupHidden = UserDefaults.standard.bool(forKey: "setupHidden") {
+        didSet { UserDefaults.standard.set(setupHidden, forKey: "setupHidden") }
+    }
+    @Published var claudeInstalled = true
+    @Published var desktopAccountId: String?
+    let isDemo: Bool
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     /// Problems found by background checks; shown in the panel instead of interrupting with alerts.
     @Published var statusMessage: String?
@@ -57,8 +63,37 @@ final class AppModel: ObservableObject {
     private var addStartedAt: Date?
     private var checkInFlight = false
 
+    /// Fake accounts for documentation screenshots; nothing is read from or written to this Mac.
+    init(demo: SwitcherState, usage: [String: AccountUsage]) {
+        isDemo = true
+        state = demo
+        self.usage = usage
+        desktopAccountId = demo.activeId
+    }
+
+    var setupSteps: [SetupGuide.Step] {
+        SetupGuide.steps(state: state, claudeInstalled: claudeInstalled, desktopAccountId: desktopAccountId)
+    }
+
+    var showSetup: Bool { !setupHidden && !SetupGuide.isComplete(setupSteps) }
+
+    private func refreshSetupFacts() {
+        let env = self.env
+        Task {
+            let facts = await Task.detached { (LoginLauncher.claudePath() != nil, env.desktopAccount.signedInAccount()?.id) }.value
+            claudeInstalled = facts.0
+            desktopAccountId = facts.1
+        }
+    }
+
+    func openInstallGuide() {
+        NSWorkspace.shared.open(URL(string: "https://docs.claude.com/en/docs/claude-code/setup")!)
+    }
+
     init() {
+        isDemo = false
         reload()
+        refreshSetupFacts()
         DispatchQueue.main.async { [appearance] in NSApp.appearance = appearance.nsAppearance }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tick() }
@@ -102,10 +137,13 @@ final class AppModel: ObservableObject {
     }
 
     func panelOpened() {
+        guard !isDemo else { return }
+        refreshSetupFacts()
         Task { await checkAccounts(); await refreshUsage(force: false) }
     }
 
     func reload() {
+        guard !isDemo else { return }
         state = (try? env.store.load()) ?? SwitcherState()
     }
 

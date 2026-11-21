@@ -23,11 +23,13 @@ struct StatusBadge: View {
 
 struct UsageBar: View {
     let fraction: Double
+    /// % used, which decides the colour (defaults to the fraction shown).
+    var usedPercent: Double?
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.1))
-                Capsule().fill(UsageBar.color(fraction * 100))
+                Capsule().fill(UsageBar.color(usedPercent ?? fraction * 100))
                     .frame(width: max(4, geo.size.width * min(1, max(0, fraction))))
             }
         }
@@ -52,7 +54,8 @@ struct UsageRow: View {
                 Text(resetText).font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
-                UsageBar(fraction: (window?.utilization ?? 0) / 100)
+                let used = window?.utilization ?? 0
+                UsageBar(fraction: mode == .remaining ? max(0, 100 - used) / 100 : used / 100, usedPercent: used)
                 Text(window.map { mode == .remaining ? "\(Int(max(0, 100 - $0.utilization).rounded()))% left" : "\(Int($0.utilization.rounded()))%" } ?? "–")
                     .font(.callout.monospacedDigit().bold())
                     .foregroundStyle(window.map { UsageBar.color($0.utilization) } ?? .secondary)
@@ -88,7 +91,10 @@ struct Card<Content: View>: View {
 struct GlassCard: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // Glass only behind the content, so badges and bars keep their colours.
+            content.background {
+                Color.clear.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
         } else {
             content
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))

@@ -6,7 +6,8 @@ struct UsageTab: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            if model.state.profiles.count < 2 {
+            if model.showSetup { SetupCard(model: model) }
+            if model.state.profiles.count < 2 && !model.showSetup {
                 Card {
                     Text(model.state.profiles.isEmpty ? "Add your Claude accounts" : "Add your other account")
                         .font(.callout.bold())
@@ -173,6 +174,12 @@ struct SettingsView: View {
             }
             Card {
                 Toggle("Open at login", isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
+                Button("Show setup guide") {
+                    model.setupHidden = false
+                    model.showSettings = false
+                    model.tab = .usage
+                }
+                .controlSize(.small)
             }
             Card {
                 Text("About").font(.callout.bold())
@@ -182,6 +189,86 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Claude Switcher \(model.version)").font(.caption2).foregroundStyle(.tertiary)
             }
+        }
+    }
+}
+
+struct SetupCard: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        let steps = model.setupSteps
+        Card {
+            HStack {
+                Text("Get set up").font(.callout.bold())
+                Text("\(steps.filter(\.done).count) of \(steps.count) done").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Hide") { model.setupHidden = true }.buttonStyle(.borderless).font(.caption)
+            }
+            ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                SetupRow(model: model, step: step)
+            }
+        }
+    }
+}
+
+struct SetupRow: View {
+    @ObservedObject var model: AppModel
+    let step: SetupGuide.Step
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: step.done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(step.done ? Color.green : Color.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.callout)
+                Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if !step.done { action }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func profile(_ id: String?) -> Profile? { id.flatMap { model.state.profile($0) } }
+
+    private var title: String {
+        switch step.kind {
+        case .installClaudeCode: "Install Claude Code"
+        case .addMain: "Add your main account"
+        case .addBackup: "Add your backup account"
+        case .desktopSignIn(let id): "Claude Desktop: sign in once as \(profile(id)?.label ?? "each account")"
+        case .vsCode: "VS Code: nothing to do"
+        }
+    }
+
+    private var detail: String {
+        switch step.kind {
+        case .installClaudeCode:
+            return "The switcher uses Claude Code's sign-in. Install it, then reopen this panel."
+        case .addMain:
+            return "Opens the Claude website. Sign in with the account you use most."
+        case .addBackup:
+            return "On claude.ai in your browser, switch to the other account first (or use a private window), then add it here."
+        case .desktopSignIn(let id):
+            guard let p = profile(id) else { return "After adding accounts, Claude Desktop needs one sign-in per account." }
+            if step.done { return "Saved — Desktop switches with you." }
+            if model.desktopAccountId == nil { return "Open Claude Desktop and sign in as \(p.email)." }
+            return p.id == model.state.activeId
+                ? "In Claude Desktop, log out and sign in as \(p.email). The switcher remembers it."
+                : "Switch to \(p.label), then in Claude Desktop log out and sign in as \(p.email)."
+        case .vsCode:
+            return "It uses Claude Code's login. After a switch, reload the VS Code window."
+        }
+    }
+
+    @ViewBuilder private var action: some View {
+        switch step.kind {
+        case .installClaudeCode:
+            Button("How to install") { model.openInstallGuide() }.controlSize(.small)
+        case .addMain, .addBackup:
+            Button("Add account") { model.addAccount() }.controlSize(.small).disabled(model.isAdding || model.isBusy)
+        default:
+            EmptyView()
         }
     }
 }

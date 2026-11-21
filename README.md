@@ -1,56 +1,94 @@
 # Claude Switcher
 
-A macOS menu-bar app for people with more than one Claude account. It shows how much of each account's usage is left, and switches Claude Code (CLI, VS Code) and the Claude Desktop app to another account in one click — without losing any local sessions.
+**Two Claude accounts, one click.** A small macOS menu-bar app that shows how much usage each of your Claude accounts has left, and switches Claude Code (terminal and VS Code) and the Claude Desktop app to another account when one runs out — without losing any of your sessions.
+
+<p align="center">
+  <img src="docs/images/usage-dark.png" width="360" alt="Usage tab: each account's session and weekly limits">
+  <img src="docs/images/usage-light.png" width="360" alt="The same panel in light mode">
+</p>
+
+- See **what's left** on every account: the 5-hour session and the weekly limit, with reset times.
+- **Switch** in one click. Your sessions stay on your Mac and keep working under the new account.
+- **Add accounts** by signing in on the Claude website — no passwords in the app.
+- Shows **extra usage** (spending beyond your plan) per account.
+
+> Screenshots use made-up accounts.
 
 ## Install
 
+1. Download `ClaudeSwitcher-<version>.dmg` from [Releases](../../releases), or [build it yourself](#build-it-yourself).
+2. Open it and drag **Claude Switcher** onto **Applications**.
+3. Open it from Applications. It appears in the menu bar, e.g. `main 70% left`.
+
+The first time, macOS may say the app is from an unidentified developer: right-click the app → **Open** → **Open**.
+
+**Requirements:** macOS 14 or later, and [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) installed (the app uses its sign-in).
+
+## First-time setup
+
+Open the panel — a **Get set up** checklist shows what's left and ticks itself off:
+
+<p align="center"><img src="docs/images/setup.png" width="360" alt="Setup checklist"></p>
+
+1. **Install Claude Code** if you haven't.
+2. **Add your main account** — click **Add account** and sign in on the Claude website.
+3. **Add your backup account** — first switch claude.ai in your browser to the other account (or use a private window), then **Add account** again. You stay on your main account.
+4. **Claude Desktop** — sign in to Desktop once as each account (log out and back in as the other one when you're on it). The app remembers Desktop's login from then on.
+5. **VS Code** — nothing to do. It uses Claude Code's login; reload the VS Code window after a switch.
+
+## Everyday use
+
+| | |
+|---|---|
+| **Usage** — each account's session and weekly limits. Click **Switch** on the account you want. | <img src="docs/images/usage-dark.png" width="260"> |
+| **Costs** — extra usage this month against your limit. | <img src="docs/images/costs.png" width="260"> |
+| **Accounts** — add, rename, choose your main account, remove. | <img src="docs/images/accounts.png" width="260"> |
+| **Settings** (⚙) — light/dark, show remaining or used, open at login. | <img src="docs/images/settings.png" width="260"> |
+
+**After switching:** restart any `claude` running in a terminal (it keeps the old account until restarted) and reload VS Code's window. Claude Desktop is closed and reopened for you.
+
+## Good to know
+
+- **Your sessions are never lost.** Terminal and VS Code sessions are files on your Mac that work under any account (`claude --resume`). Claude Desktop's session list is kept in sync between accounts on every switch. Nothing is uploaded.
+- **Regular Claude chats** (claude.ai conversations) belong to each account and can't move between them.
+- **One account at a time.** Switching quits Claude Desktop, which interrupts anything running in it.
+- **Usage numbers** come from the same place Claude Code's `/usage` does. The active account is live; others are live while their saved sign-in is valid (a few hours after you last used them), otherwise the last known numbers are shown with "as of …".
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| **Add account** signs in the same account again | The browser signs in whoever is logged in to claude.ai. Switch accounts there first, or use a private window. |
+| "The browser sign-in didn't finish" | Click **Use Terminal instead** and finish the sign-in there. |
+| Claude Desktop is still on the old account | It hasn't been signed in as this account yet — sign in once, and the next switches follow. |
+| Claude Desktop asks you to sign in after a switch | Please open an issue: the set of files that hold Desktop's sign-in may have changed. |
+| A warning line at the top of the panel | It says what failed; most clear up by themselves. Otherwise remove the account and add it again. |
+
+## Privacy and security
+
+- The app never sees your password: adding an account runs Claude Code's own sign-in (`claude auth login`) in your browser.
+- Saved sign-ins live in your macOS **Keychain** (`ClaudeSwitcher.<account id>`). Saved Claude Desktop sign-ins are in `~/Library/Application Support/ClaudeSwitcher/vault/`, readable only by you.
+- The only network requests are to Anthropic, to read each account's usage.
+- Before changing `~/.claude.json` the app keeps a copy at `~/.claude.json.switcher-bak`.
+
+## Build it yourself
+
+Needs Xcode or just the Command Line Tools (`xcode-select --install`).
+
 ```bash
-scripts/dmg.sh        # builds dist/ClaudeSwitcher-<version>.dmg
+git clone <this repo> && cd claude-switcher
+scripts/test.sh     # run the tests
+scripts/dmg.sh      # builds dist/ClaudeSwitcher-<version>.dmg
 ```
 
-Open the `.dmg`, drag **Claude Switcher** onto **Applications**, open it. It sits in the menu bar showing the active account and its session usage, e.g. `main 42%`.
+`scripts/bundle.sh` builds only the `.app`. The version is in `Resources/Info.plist`. Regenerate the screenshots with:
 
-The app is ad-hoc signed, not notarized: a copy you built yourself opens normally; one downloaded from the internet needs right-click → **Open** the first time.
+```bash
+"$(swift build --show-bin-path)/ClaudeSwitcher" --screenshots docs/images
+```
 
-Development: `scripts/test.sh` runs the tests, `scripts/bundle.sh` builds just the `.app`.
+How it works, in detail: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md). Design notes and plans: [docs/design](docs/design).
 
-## Adding accounts
+## Not affiliated
 
-Click the menu-bar item → **Accounts** → **Add account**. Claude Code's own sign-in (`claude auth login`) opens the Claude website; sign in there. The account is saved automatically and you stay on the account you were using. If the browser sign-in doesn't finish, use **Use Terminal instead**.
-
-Accounts you sign in to any other way (`claude auth login`, `/login`) are picked up automatically too. The first account becomes Main, the rest Backup — change that and the names in **Accounts**.
-
-**Claude Desktop:** the browser sign-in covers the CLI and VS Code. The first time you switch Desktop to an account it hasn't seen, sign in to Desktop once as that account; from then on the app swaps Desktop's login too.
-
-## Switching
-
-Click **Switch** on an account card. The app saves your current login, quits Claude Desktop, swaps in the other account's login for the CLI, VS Code and Desktop, and reopens Desktop. If anything fails it puts everything back and tells you what happened.
-
-Afterwards restart any running `claude` (it keeps the old account until restarted) and reload VS Code's Claude panel.
-
-## Sessions
-
-Sessions live on this Mac and are never uploaded or deleted.
-
-- CLI and VS Code show every session under any account (`claude --resume`).
-- Claude Desktop keeps a session list per account; the app merges those lists both ways on every switch, so Desktop shows the same sessions whichever account is active.
-
-## Usage and Costs
-
-- **Usage**: Session (5-hour) and Weekly limits with reset times, per account. Bars turn amber at 75 % and red at 90 %.
-- **Costs**: Extra usage — spending beyond your plan this month, against your monthly limit.
-
-Numbers come from the same service Claude Code uses for `/usage`. The active account is fetched live; other accounts are live while their saved sign-in is still valid (a few hours after you last used them), otherwise the last known numbers are shown with "as of …". Switching to an account gives fresh numbers. The service is undocumented, so if it changes the app falls back to Claude Code's cached numbers.
-
-## Where things live
-
-- Saved logins: Keychain items `ClaudeSwitcher.<accountUuid>` (and `.prev`, the copy before the last save)
-- Accounts and last known usage: `~/Library/Application Support/ClaudeSwitcher/profiles.json`
-- Saved Desktop logins: `~/Library/Application Support/ClaudeSwitcher/vault/<accountUuid>/` (owner-only, not encrypted beyond what Desktop itself does)
-- `~/.claude.json` is backed up to `~/.claude.json.switcher-bak` before each change.
-
-## Known limits
-
-- One account active at a time; switching quits Claude Desktop, interrupting Code sessions running in it.
-- Regular Desktop chats (claude.ai conversations) can't move between accounts.
-- Which Desktop files hold its sign-in is a best guess (`DesktopLoginFiles.defaultPaths`); if Desktop asks you to sign in after a switch, that list needs adjusting.
+Claude Switcher is an independent tool. It is not made by or affiliated with Anthropic.
