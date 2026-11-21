@@ -104,6 +104,10 @@ git tag v0.1.0 && git push origin v0.1.0
 
 How it works, in detail: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md). Design notes and plans: [docs/design](docs/design).
 
+## License
+
+[MIT](LICENSE)
+
 ## Not affiliated
 
 Claude Switcher is an independent tool. It is not made by or affiliated with Anthropic.
