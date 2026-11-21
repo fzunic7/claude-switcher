@@ -54,6 +54,7 @@ public struct DesktopLoginFiles: DesktopLoginStore {
     }
 
     public func removeSnapshot(_ accountUuid: String) throws {
+        guard !accountUuid.isEmpty, !accountUuid.contains("/"), accountUuid != ".", accountUuid != ".." else { return }
         let dir = vaultRoot.appendingPathComponent(accountUuid)
         if FileManager.default.fileExists(atPath: dir.path) { try FileManager.default.removeItem(at: dir) }
     }

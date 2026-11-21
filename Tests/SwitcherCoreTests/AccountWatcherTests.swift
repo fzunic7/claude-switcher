@@ -74,8 +74,9 @@ import Testing
         let watcher = AccountWatcher(env: w.env)
         try watcher.beginAdd()
         try signInFresh(w, "B", email: "B@x")
-        #expect(try await watcher.check() == .none)
+        #expect(try await watcher.check() == .activeChanged("B"))
         #expect(!watcher.isAdding)
+        #expect(try w.env.store.load().activeId == "B")
         #expect(try w.env.store.load().profiles.count == 2)
         #expect(try w.liveToken() == "tok-B")
     }
@@ -101,7 +102,7 @@ import Testing
         #expect(try w.vaultToken("B") == nil)
 
         try signInFresh(w, "A", email: "A@x")
-        #expect(try await watcher.check() == .none)
+        #expect(try await watcher.check() == .activeChanged("A"))
         state = try w.env.store.load()
         #expect(state.ignoredAccountId == nil)
 
@@ -127,5 +128,85 @@ import Testing
         #expect(try w.cookies() == "cookies-B")
         #expect(w.desktop.quits == quitsBefore)
         #expect(try w.env.store.load().activeId == "A")
+    }
+}
+
+@Suite struct AccountWatcherReviewTests {
+    func writeAccount(_ w: World, _ id: String?) throws {
+        let json = id.map { #"{"oauthAccount":{"accountUuid":"\#($0)","organizationUuid":"org-\#($0)","emailAddress":"\#($0)@x"}}"# } ?? #"{"numStartups":1}"#
+        try Data(json.utf8).write(to: w.claudeJSONURL)
+    }
+
+    @Test func halfWrittenLoginIsNotCaptured() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        _ = try await Switcher(env: w.env).switchTo("A")       // live: A, token tok-A
+        let watcher = AccountWatcher(env: w.env)
+        try watcher.beginAdd()
+        try writeAccount(w, "C")                                // .claude.json updated, Keychain still A's
+        #expect(try await watcher.check() == .none)
+        #expect(try w.env.store.load().profile("C") == nil)
+        #expect(try w.vaultToken("C") == nil)
+        #expect(watcher.isAdding)
+    }
+
+    @Test func noCaptureWhileSignInProcessStillRunning() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        let watcher = AccountWatcher(env: w.env)
+        try watcher.beginAdd()
+        watcher.signInInProgress = true
+        try writeAccount(w, "C")
+        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-C".utf8))
+        #expect(try await watcher.check() == .none)
+        watcher.signInInProgress = false
+        guard case .addedAndRestored = try await watcher.check() else { Issue.record("expected add after exit"); return }
+    }
+
+    @Test func liveSavedAccountBecomesActive() async throws {
+        let w = try World()
+        try await w.captureBoth()                               // activeId B
+        try writeAccount(w, "A")
+        try w.secrets.write(service: ServiceNames.claudeCode, account: "unknown", secret: Data("tok-A".utf8))
+        #expect(try await AccountWatcher(env: w.env).check() == .activeChanged("A"))
+        #expect(try w.env.store.load().activeId == "A")
+    }
+
+    @Test func abandonAddRestoresPreviousWhenLoginWasRemoved() async throws {
+        let w = try World()
+        try await w.captureBoth()                               // B live
+        let watcher = AccountWatcher(env: w.env)
+        try watcher.beginAdd()
+        try w.secrets.delete(service: ServiceNames.claudeCode)  // sign-in logged out, then was cancelled
+        try writeAccount(w, nil)
+        try watcher.abandonAdd()
+        #expect(!watcher.isAdding)
+        #expect(try w.liveToken() == "tok-B")
+        #expect(try ClaudeJSON(url: w.claudeJSONURL).readAccount()?["accountUuid"] == .string("B"))
+    }
+
+    @Test func abandonAddLeavesUntouchedLoginAlone() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        let watcher = AccountWatcher(env: w.env)
+        try watcher.beginAdd()
+        try watcher.abandonAdd()
+        #expect(try w.liveToken() == "tok-B")
+    }
+
+    @Test func switchToActiveWithMissingLiveLoginRestoresIt() async throws {
+        let w = try World()
+        try await w.captureBoth()                               // activeId B
+        try w.secrets.delete(service: ServiceNames.claudeCode)
+        try writeAccount(w, nil)
+        _ = try await Switcher(env: w.env).switchTo("B")
+        #expect(try w.liveToken() == "tok-B")
+    }
+
+    @Test func removeProfileRejectsEmptyId() async throws {
+        let w = try World()
+        try await w.captureBoth()
+        #expect(throws: SwitchError.self) { try Switcher(env: w.env).removeProfile("") }
+        #expect(w.realLogin.hasSnapshot("A") && w.realLogin.hasSnapshot("B"))
     }
 }

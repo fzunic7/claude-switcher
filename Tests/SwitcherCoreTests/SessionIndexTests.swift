@@ -81,4 +81,14 @@ import Testing
         #expect(fm.fileExists(atPath: root.appendingPathComponent("A/O/local_5.json").path))
         #expect(!fm.fileExists(atPath: b.appendingPathComponent("deleted_local_4.json").path))
     }
+
+    @Test func mergeDoesNotResurrectDeletedSessions() throws {
+        let (root, index) = try setup()                 // A/O has local_1, local_2, local_3, deleted_local_4
+        let b = root.appendingPathComponent("B/P")
+        try fm.createDirectory(at: b, withIntermediateDirectories: true)
+        try record("still-in-b", 10).write(to: b.appendingPathComponent("local_4.json"))
+        let result = try index.merge(("A", "O"), ("B", "P"))
+        #expect(!result.toA.contains("local_4"))
+        #expect(!fm.fileExists(atPath: root.appendingPathComponent("A/O/local_4.json").path))
+    }
 }

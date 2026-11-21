@@ -54,8 +54,13 @@ public final class Switcher: @unchecked Sendable {
         let state = try env.store.load()
         guard let target = state.profile(targetId) else { throw SwitchError.unknownProfile(targetId) }
         let liveAccount = try env.claudeJSON.readAccount()
-        let currentId = liveAccount?["accountUuid"]?.stringValue ?? state.activeId
-        if currentId == targetId { throw SwitchError.alreadyActive }
+        let liveSecret = try env.secrets.read(service: ServiceNames.claudeCode)
+        var currentId = liveAccount?["accountUuid"]?.stringValue ?? state.activeId
+        if currentId == targetId {
+            // Already on it — unless the live login is gone (e.g. a cancelled sign-in); then restore it.
+            guard liveSecret == nil || liveAccount == nil else { throw SwitchError.alreadyActive }
+            currentId = nil
+        }
         guard let targetSecret = try env.secrets.read(service: ServiceNames.vault(targetId)) else {
             throw SwitchError.missingSecret(target.label)
         }
@@ -199,6 +204,7 @@ public final class Switcher: @unchecked Sendable {
 
     /// Forgets a saved account: its saved logins (Claude Code and Desktop) are deleted.
     public func removeProfile(_ id: String) throws {
+        guard !id.isEmpty else { throw SwitchError.unknownProfile(id) }
         var state = try env.store.load()
         try env.secrets.delete(service: ServiceNames.vault(id))
         try env.secrets.delete(service: ServiceNames.vaultPrevious(id))

@@ -7,6 +7,9 @@ struct PanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if let message = model.statusMessage {
+                Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            }
             if model.showSettings {
                 Text("Settings").font(.headline)
                 SettingsView(model: model)

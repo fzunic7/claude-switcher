@@ -20,6 +20,10 @@ final class AppModel: ObservableObject {
     @Published var renamingId: String?
     @Published var renameText = ""
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    /// Problems found by background checks; shown in the panel instead of interrupting with alerts.
+    @Published var statusMessage: String?
+    /// The background sign-in ended without adding an account.
+    @Published var signInStalled = false
 
     let env = SwitcherEnvironment.live(desktop: LiveDesktopApp())
     private lazy var watcher = AccountWatcher(env: env)
@@ -31,7 +35,7 @@ final class AppModel: ObservableObject {
     private var lastUsageRefresh = Date.distantPast
     private var loginProcess: Process?
     private var addStartedAt: Date?
-    private var usedTerminalFallback = false
+    private var checkInFlight = false
 
     init() {
         reload()
@@ -64,12 +68,17 @@ final class AppModel: ObservableObject {
 
     private func tick() async {
         if let started = addStartedAt, Date().timeIntervalSince(started) > 300 { cancelAdd() }
-        if isAdding || Date().timeIntervalSince(lastAccountCheck) >= 30 { await checkAccounts() }
-        if Date().timeIntervalSince(lastUsageRefresh) >= 300 { await refreshUsage(force: true) }
-        if isAdding, let p = loginProcess, !p.isRunning, p.terminationStatus != 0, !usedTerminalFallback {
-            usedTerminalFallback = true
-            try? LoginLauncher.openInTerminal()
+        var loginJustEnded = false
+        if isAdding, let p = loginProcess, !p.isRunning {
+            loginProcess = nil
+            watcher.signInInProgress = false
+            loginJustEnded = true
+            if p.terminationStatus != 0 { signInStalled = true }
         }
+        if isAdding || Date().timeIntervalSince(lastAccountCheck) >= 30 { await checkAccounts() }
+        // A finished sign-in that added nothing (e.g. the same account again) ends the wait.
+        if loginJustEnded, isAdding, !signInStalled { cancelAdd() }
+        if Date().timeIntervalSince(lastUsageRefresh) >= 300 { await refreshUsage(force: true) }
     }
 
     func panelOpened() {
@@ -84,11 +93,14 @@ final class AppModel: ObservableObject {
 
     func checkAccounts() async {
         lastAccountCheck = Date()
-        guard !isBusy else { return }
+        guard !isBusy, !checkInFlight else { return }
+        checkInFlight = true
+        defer { checkInFlight = false }
         do {
             let event = try await watcher.check()
             switch event {
             case .none: break
+            case .activeChanged: break
             case .added(let p):
                 notify(title: "Added \(p.email)", body: "Saved as \(p.role == .main ? "Main" : "Backup").")
             case .addedAndRestored(let p, let restored):
@@ -96,8 +108,9 @@ final class AppModel: ObservableObject {
                 notify(title: "Added \(p.email)", body: "You're still on \(back).")
             }
             if event != .none { reload(); await refreshUsage(force: true) }
+            statusMessage = nil
         } catch {
-            showError(error)
+            statusMessage = "Couldn't check accounts: \(describe(error))"
         }
         if isAdding && !watcher.isAdding { finishAdd() }
     }
@@ -106,11 +119,11 @@ final class AppModel: ObservableObject {
         guard !isAdding, !isBusy else { return }
         do {
             try watcher.beginAdd()
-            usedTerminalFallback = false
+            signInStalled = false
             do {
                 loginProcess = try LoginLauncher.startLogin()
+                watcher.signInInProgress = true
             } catch {
-                usedTerminalFallback = true
                 try LoginLauncher.openInTerminal()
             }
             isAdding = true
@@ -123,21 +136,28 @@ final class AppModel: ObservableObject {
     }
 
     func signInInTerminal() {
-        usedTerminalFallback = true
-        loginProcess?.terminate()
+        if let p = loginProcess, p.isRunning { p.terminate() }
+        loginProcess = nil
+        watcher.signInInProgress = false
+        signInStalled = false
+        addStartedAt = Date()
         do { try LoginLauncher.openInTerminal() } catch { showError(error) }
     }
 
+    /// Stops waiting; if the sign-in removed or replaced your login, the previous account is put back.
     func cancelAdd() {
-        watcher.cancelAdd()
+        if let p = loginProcess, p.isRunning { p.terminate() }
+        watcher.signInInProgress = false
+        do { try watcher.abandonAdd() } catch { showError(error) }
         finishAdd()
+        reload()
     }
 
     private func finishAdd() {
-        if let p = loginProcess, p.isRunning { p.terminate() }
         loginProcess = nil
         addStartedAt = nil
         isAdding = false
+        signInStalled = false
     }
 
     func startRename(_ profile: Profile) {
@@ -234,6 +254,14 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Feedback
+
+    private func describe(_ error: Error) -> String {
+        switch error {
+        case SwitchError.stepFailed(let step, let underlying): "\(step): \(underlying)"
+        case SwitchError.missingSecret(let label): "saved login for \(label) is missing"
+        default: String(describing: error)
+        }
+    }
 
     private func showError(_ error: Error) {
         let alert = NSAlert()

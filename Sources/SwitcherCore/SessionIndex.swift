@@ -62,7 +62,9 @@ public struct SessionIndex: SessionSharing {
         for id in ids.sorted() where Self.isSessionId(id) {
             let source = src.appendingPathComponent("\(id).json")
             let target = dst.appendingPathComponent("\(id).json")
-            guard fm.fileExists(atPath: source.path), !fm.fileExists(atPath: target.path) else { continue }
+            let tombstone = dst.appendingPathComponent("deleted_\(id).json")   // deleted there: don't bring it back
+            guard fm.fileExists(atPath: source.path), !fm.fileExists(atPath: target.path),
+                  !fm.fileExists(atPath: tombstone.path) else { continue }
             try fm.createDirectory(at: dst, withIntermediateDirectories: true)
             try fm.copyItem(at: source, to: target)
             copied.append(id)

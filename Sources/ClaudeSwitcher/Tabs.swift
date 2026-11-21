@@ -115,9 +115,13 @@ struct AccountsTab: View {
             }
             if model.isAdding {
                 Card {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Waiting for you to sign in in the browser…").font(.callout)
+                    if model.signInStalled {
+                        Text("The browser sign-in didn't finish. Try again in Terminal, or cancel.").font(.callout)
+                    } else {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Waiting for you to sign in in the browser…").font(.callout)
+                        }
                     }
                     HStack {
                         Button("Use Terminal instead") { model.signInInTerminal() }
