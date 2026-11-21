@@ -6,6 +6,7 @@ struct ClaudeSwitcherApp: App {
 
     init() {
         Screenshots.renderIfRequested()
+        BrandAssets.renderIfRequested()
     }
 
     var body: some Scene {

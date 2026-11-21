@@ -1,5 +1,7 @@
 # Claude Switcher
 
+> **Alpha.** It works on the author's Mac; expect rough edges and please report what you find.
+
 **Two Claude accounts, one click.** A small macOS menu-bar app that shows how much usage each of your Claude accounts has left, and switches Claude Code (terminal and VS Code) and the Claude Desktop app to another account when one runs out — without losing any of your sessions.
 
 <p align="center">
@@ -11,6 +13,7 @@
 - **Switch** in one click. Your sessions stay on your Mac and keep working under the new account.
 - **Add accounts** by signing in on the Claude website — no passwords in the app.
 - Shows **extra usage** (spending beyond your plan) per account.
+- Optional **auto-switch** when the active account drops to 5% left.
 
 > Screenshots use made-up accounts.
 
@@ -43,9 +46,11 @@ Open the panel — a **Get set up** checklist shows what's left and ticks itself
 | **Usage** — each account's session and weekly limits. Click **Switch** on the account you want. | <img src="docs/images/usage-dark.png" width="260"> |
 | **Costs** — extra usage this month against your limit. | <img src="docs/images/costs.png" width="260"> |
 | **Accounts** — add, rename, choose your main account, remove. | <img src="docs/images/accounts.png" width="260"> |
-| **Settings** (⚙) — light/dark, show remaining or used, open at login. | <img src="docs/images/settings.png" width="260"> |
+| **Settings** (⚙) — light/dark, show remaining or used, auto-switch, open at login. | <img src="docs/images/settings.png" width="260"> |
 
 **After switching:** restart any `claude` running in a terminal (it keeps the old account until restarted) and reload VS Code's window. Claude Desktop is closed and reopened for you.
+
+**Auto-switch** (off by default, in Settings): when the active account's session or weekly limit drops to 5% left, the app switches to the account with the most left (at least 20%), at most once every 30 minutes, and sends a notification. It closes and reopens Claude Desktop like any switch.
 
 ## Good to know
 
@@ -85,6 +90,16 @@ scripts/dmg.sh      # builds dist/ClaudeSwitcher-<version>.dmg
 
 ```bash
 "$(swift build --show-bin-path)/ClaudeSwitcher" --screenshots docs/images
+```
+
+Regenerate the app icon and DMG background with `scripts/make-assets.sh`.
+
+### Releasing
+
+Push a version tag and GitHub builds the DMG and publishes the release (`.github/workflows/release.yml`); versions below 1.0 are marked pre-release.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 How it works, in detail: [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md). Design notes and plans: [docs/design](docs/design).

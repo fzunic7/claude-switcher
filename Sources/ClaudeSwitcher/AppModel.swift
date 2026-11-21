@@ -42,6 +42,13 @@ final class AppModel: ObservableObject {
     @Published var setupHidden = UserDefaults.standard.bool(forKey: "setupHidden") {
         didSet { UserDefaults.standard.set(setupHidden, forKey: "setupHidden") }
     }
+    @Published var autoSwitch = UserDefaults.standard.bool(forKey: "autoSwitch") {
+        didSet { UserDefaults.standard.set(autoSwitch, forKey: "autoSwitch") }
+    }
+    private var lastAutoSwitch: Date? {
+        get { UserDefaults.standard.object(forKey: "lastAutoSwitch") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "lastAutoSwitch") }
+    }
     @Published var claudeInstalled = true
     @Published var desktopAccountId: String?
     let isDemo: Bool
@@ -276,12 +283,12 @@ final class AppModel: ObservableObject {
 
     // MARK: Switching
 
-    func switchTo(_ profile: Profile) async {
+    func switchTo(_ profile: Profile, automatic: Bool = false) async {
         guard !isBusy, !isAdding else { return }
         isBusy = true          // also pauses background account checks while the confirmation is up
         defer { isBusy = false; reload() }
         let running = (try? RunningClaude().cliProcessCount()) ?? 0
-        if running > 0 || env.desktop.isRunning {
+        if !automatic && (running > 0 || env.desktop.isRunning) {
             let alert = NSAlert()
             alert.messageText = "Switch to \(profile.label)?"
             alert.informativeText = running > 0
@@ -294,13 +301,16 @@ final class AppModel: ObservableObject {
         }
         do {
             let result = try await switcher.switchTo(profile.id)
-            var body = "Restart running `claude` and reload VS Code's Claude panel; `claude --resume` shows all your sessions."
+            var body = automatic
+                ? "Your previous account was nearly out. Restart running `claude` and reload VS Code's window."
+                : "Restart running `claude` and reload VS Code's Claude panel; `claude --resume` shows all your sessions."
             body += result.warnings.map { " " + $0 }.joined()
-            notify(title: "Now on \(profile.label)", body: body)
+            notify(title: automatic ? "Switched to \(profile.label) automatically" : "Now on \(profile.label)", body: body)
             reload()
             await refreshUsage(force: true)
         } catch {
-            showError(error)
+            if automatic { statusMessage = "Automatic switch to \(profile.label) failed: \(describe(error))" }
+            else { showError(error) }
         }
     }
 
@@ -313,6 +323,16 @@ final class AppModel: ObservableObject {
         usage = await usageService.refresh()
         isRefreshing = false
         reload()
+        await autoSwitchIfNeeded()
+    }
+
+    private func autoSwitchIfNeeded() async {
+        guard autoSwitch, !isDemo, !isBusy, !isAdding, let active else { return }
+        guard let targetId = AutoSwitch.target(activeId: active.id, candidates: state.profiles, usage: usage,
+                                               lastAutoSwitch: lastAutoSwitch, now: Date()),
+              let target = state.profile(targetId) else { return }
+        lastAutoSwitch = Date()
+        await switchTo(target, automatic: true)
     }
 
     // MARK: Settings
