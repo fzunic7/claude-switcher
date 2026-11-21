@@ -1,10 +1,20 @@
 import AppKit
+import SwiftUI
 import ServiceManagement
 import SwitcherCore
 import UserNotifications
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum Appearance: String, CaseIterable, Identifiable {
+        case system = "System", light = "Light", dark = "Dark"
+        var id: String { rawValue }
+        var colorScheme: ColorScheme? { self == .light ? .light : self == .dark ? .dark : nil }
+        var nsAppearance: NSAppearance? {
+            self == .light ? NSAppearance(named: .aqua) : self == .dark ? NSAppearance(named: .darkAqua) : nil
+        }
+    }
+
     enum Tab: String, CaseIterable, Identifiable {
         case usage = "Usage", costs = "Costs", accounts = "Accounts"
         var id: String { rawValue }
@@ -20,6 +30,16 @@ final class AppModel: ObservableObject {
     @Published var renamingId: String?
     @Published var renameText = ""
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
+    @Published var appearance: Appearance = Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: "appearance")
+            NSApp.appearance = appearance.nsAppearance
+        }
+    }
+    @Published var menuBarMode: UsageDisplayMode = UsageDisplayMode(rawValue: UserDefaults.standard.string(forKey: "menuBarMode") ?? "") ?? .remaining {
+        didSet { UserDefaults.standard.set(menuBarMode.rawValue, forKey: "menuBarMode") }
+    }
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     /// Problems found by background checks; shown in the panel instead of interrupting with alerts.
     @Published var statusMessage: String?
     /// The background sign-in ended without adding an account.
@@ -39,6 +59,7 @@ final class AppModel: ObservableObject {
 
     init() {
         reload()
+        DispatchQueue.main.async { [appearance] in NSApp.appearance = appearance.nsAppearance }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tick() }
         }
@@ -60,8 +81,7 @@ final class AppModel: ObservableObject {
 
     var menuBarTitle: String {
         guard let active else { return "Claude" }
-        guard let session = usage[active.id]?.session else { return "\(active.label) –" }
-        return "\(active.label) \(Int(session.utilization.rounded()))%"
+        return UsageDisplay.menuBarTitle(label: active.label, usage: usage[active.id], mode: menuBarMode)
     }
 
     // MARK: Timers

@@ -42,6 +42,7 @@ struct UsageBar: View {
 struct UsageRow: View {
     let title: String
     let window: UsageWindow?
+    var mode: UsageDisplayMode = .used
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -52,16 +53,17 @@ struct UsageRow: View {
             }
             HStack(spacing: 8) {
                 UsageBar(fraction: (window?.utilization ?? 0) / 100)
-                Text(window.map { "\(Int($0.utilization.rounded()))%" } ?? "–")
+                Text(window.map { mode == .remaining ? "\(Int(max(0, 100 - $0.utilization).rounded()))% left" : "\(Int($0.utilization.rounded()))%" } ?? "–")
                     .font(.callout.monospacedDigit().bold())
                     .foregroundStyle(window.map { UsageBar.color($0.utilization) } ?? .secondary)
-                    .frame(width: 44, alignment: .trailing)
+                    .frame(width: 76, alignment: .trailing)
             }
         }
     }
 
     private var resetText: String {
-        guard let date = window?.resetsAt else { return "" }
+        guard let window else { return "" }
+        guard let date = window.resetsAt else { return window.utilization == 0 ? "Not started" : "" }
         let seconds = date.timeIntervalSinceNow
         if seconds <= 0 { return "Resetting" }
         if seconds < 24 * 3600 {
@@ -77,8 +79,21 @@ struct Card<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08)))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(GlassCard())
+    }
+}
+
+/// Liquid Glass on macOS 26 and later; a soft material card before that.
+struct GlassCard: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        } else {
+            content
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.primary.opacity(0.08)))
+        }
     }
 }
 
@@ -111,8 +126,10 @@ struct AccountCard: View {
             if usage == nil {
                 Text("No usage data yet").font(.caption).foregroundStyle(.secondary)
             } else {
-                UsageRow(title: "Session", window: usage?.session)
-                UsageRow(title: "Weekly", window: usage?.weekly)
+                // No session window while other numbers are known: the 5-hour session hasn't started (0%).
+                UsageRow(title: "Session", window: usage?.session ?? UsageWindow(utilization: 0, resetsAt: nil),
+                         mode: model.menuBarMode)
+                UsageRow(title: "Weekly", window: usage?.weekly, mode: model.menuBarMode)
                 HStack {
                     Image(systemName: "bolt.slash").font(.caption).foregroundStyle(.secondary)
                     Text("Extra usage").font(.callout)

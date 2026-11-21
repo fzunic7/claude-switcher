@@ -10,28 +10,34 @@ struct PanelView: View {
             if let message = model.statusMessage {
                 Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             }
-            if model.showSettings {
-                Text("Settings").font(.headline)
-                SettingsView(model: model)
-            } else {
-                Picker("", selection: $model.tab) {
-                    ForEach(AppModel.Tab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                ScrollView {
-                    switch model.tab {
-                    case .usage: UsageTab(model: model)
-                    case .costs: CostsTab(model: model)
-                    case .accounts: AccountsTab(model: model)
+            // One fixed-height area for tabs and settings, so the panel never changes size.
+            VStack(spacing: 12) {
+                if model.showSettings {
+                    ScrollView { SettingsView(model: model).padding(.horizontal, 2) }
+                } else {
+                    Picker("", selection: $model.tab) {
+                        ForEach(AppModel.Tab.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    ScrollView {
+                        Group {
+                            switch model.tab {
+                            case .usage: UsageTab(model: model)
+                            case .costs: CostsTab(model: model)
+                            case .accounts: AccountsTab(model: model)
+                            }
+                        }
+                        .padding(.horizontal, 2)
                     }
                 }
-                .frame(height: 560)
             }
+            .frame(height: 600, alignment: .top)
             footer
         }
         .padding(14)
         .frame(width: 380)
+        .preferredColorScheme(model.appearance.colorScheme)
         .onAppear { model.panelOpened() }
     }
 
@@ -58,7 +64,9 @@ struct PanelView: View {
             }
             .help("Refresh usage")
             .disabled(model.isRefreshing)
-            Button { model.showSettings.toggle() } label: { Image(systemName: "gearshape") }
+            Button { model.showSettings.toggle() } label: {
+                Image(systemName: model.showSettings ? "gearshape.fill" : "gearshape")
+            }
                 .help("Settings")
             Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power") }
                 .help("Quit")

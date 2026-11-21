@@ -149,12 +149,39 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Open at login", isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
-            Text("Usage comes from Claude's usage service (live for the active account, and for other accounts while their saved sign-in is still valid), otherwise the last known numbers.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Sessions stay on this Mac. Switching never uploads or deletes them.")
-                .font(.caption).foregroundStyle(.secondary)
-            Button("Done") { model.showSettings = false }
+            HStack {
+                Text("Settings").font(.headline)
+                Spacer()
+                Button("Done") { model.showSettings = false }.keyboardShortcut(.defaultAction)
+            }
+            Card {
+                Text("Appearance").font(.callout.bold())
+                Picker("", selection: $model.appearance) {
+                    ForEach(AppModel.Appearance.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+            }
+            Card {
+                Text("Usage shows").font(.callout.bold())
+                Picker("", selection: $model.menuBarMode) {
+                    Text("Remaining").tag(UsageDisplayMode.remaining)
+                    Text("Used").tag(UsageDisplayMode.used)
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                Text("Applies to the menu bar and the account cards. The menu bar shows the active account's 5-hour session.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Card {
+                Toggle("Open at login", isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
+            }
+            Card {
+                Text("About").font(.callout.bold())
+                Text("Usage is live for the active account, and for other accounts while their saved sign-in is still valid; otherwise the last known numbers are shown.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Sessions stay on this Mac. Switching never uploads or deletes them.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Claude Switcher \(model.version)").font(.caption2).foregroundStyle(.tertiary)
+            }
         }
     }
 }
