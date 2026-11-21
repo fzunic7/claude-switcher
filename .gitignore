@@ -2,3 +2,4 @@
 dist/
 .superpowers/
 .swiftpm/
+.DS_Store
