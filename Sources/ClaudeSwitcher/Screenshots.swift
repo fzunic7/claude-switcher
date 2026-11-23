@@ -61,16 +61,20 @@ enum Screenshots {
     static func demoModel() -> AppModel {
         let now = Date()
         let main = profile("a", "main", .main, "main@example.com", "claude_max", desktop: true)
-        let backup = profile("b", "backup", .backup, "backup@example.com", "claude_pro", desktop: true)
+        let backup = profile("b", "backup", .backup, "backup@example.com", "claude_team", desktop: true)
         let state = SwitcherState(profiles: [main, backup], activeId: "a")
+        let week = now.addingTimeInterval(2 * 86400), week2 = now.addingTimeInterval(4 * 86400)
         let usage: [String: AccountUsage] = [
-            "a": AccountUsage(session: UsageWindow(utilization: 82, resetsAt: now.addingTimeInterval(3 * 3600 + 13 * 60)),
-                              weekly: UsageWindow(utilization: 48, resetsAt: now.addingTimeInterval(2 * 86400)),
+            // Max: no 5-hour session limit; weekly limit plus a per-model weekly limit.
+            "a": AccountUsage(session: nil, weekly: UsageWindow(utilization: 48, resetsAt: week),
                               extra: ExtraUsage(isEnabled: true, monthlyLimit: 5000, usedCredits: 1240, utilization: 24.8,
                                                 currency: "USD", decimalPlaces: 2, spendLimitReached: false),
-                              fetchedAt: now, isLive: true),
+                              fetchedAt: now, isLive: true,
+                              limits: [UsageLimit(kind: "weekly_all", group: "weekly", percent: 48, resetsAt: week, scope: nil, isActive: false),
+                                       UsageLimit(kind: "weekly_scoped", group: "weekly", percent: 86, resetsAt: week, scope: "Opus", isActive: true)]),
+            // Team/Pro: 5-hour session plus weekly.
             "b": AccountUsage(session: UsageWindow(utilization: 6, resetsAt: now.addingTimeInterval(4 * 3600 + 9 * 60)),
-                              weekly: UsageWindow(utilization: 27, resetsAt: now.addingTimeInterval(4 * 86400)),
+                              weekly: UsageWindow(utilization: 27, resetsAt: week2),
                               extra: ExtraUsage(isEnabled: false, monthlyLimit: nil, usedCredits: nil, utilization: nil,
                                                 currency: "USD", decimalPlaces: 2, spendLimitReached: false),
                               fetchedAt: now.addingTimeInterval(-2 * 3600), isLive: false),

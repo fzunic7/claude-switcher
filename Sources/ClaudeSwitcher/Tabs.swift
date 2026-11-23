@@ -169,7 +169,7 @@ struct SettingsView: View {
                     Text("Used").tag(UsageDisplayMode.used)
                 }
                 .pickerStyle(.segmented).labelsHidden()
-                Text("Applies to the menu bar and the account cards. The menu bar shows the active account's 5-hour session.")
+                Text("Applies to the menu bar and the account cards. The menu bar shows the limit that matters most for the active account (its 5-hour session, or its weekly limit on plans without one).")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Card {
@@ -179,7 +179,7 @@ struct SettingsView: View {
             }
             Card {
                 Toggle("Switch automatically when 5% is left", isOn: $model.autoSwitch)
-                Text("When the active account's session or weekly limit drops to 5% left, switch to the account with the most left (at least 20%). Claude Desktop restarts; running `claude` needs a restart.")
+                Text("When any of the active account's limits drops to 5% left, switch to the account with the most room (at least 20% on every limit). Claude Desktop restarts; running `claude` needs a restart.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Card {

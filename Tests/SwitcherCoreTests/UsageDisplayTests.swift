@@ -16,9 +16,8 @@ import Testing
         #expect(UsageDisplay.menuBarTitle(label: "me", usage: used30, mode: .used) == "me 30% used")
     }
 
-    @Test func sessionNotStartedCountsAsZeroUsed() {
-        #expect(UsageDisplay.menuBarTitle(label: "it", usage: notStarted, mode: .remaining) == "it 100% left")
-        #expect(UsageDisplay.sessionUsed(notStarted) == 0)
+    @Test func missingSessionMeansTheWeeklyLimitIsShown() {
+        #expect(UsageDisplay.menuBarTitle(label: "it", usage: notStarted, mode: .remaining) == "it 66% left · week")
     }
 
     @Test func unknownUsageShowsDash() {

@@ -348,12 +348,11 @@ final class AppModel: ObservableObject {
               let alert = LowUsageAlert.check(accountId: active.id, usage: usage[active.id], now: Date()),
               !announcedKeys.contains(alert.key) else { return }
         announcedKeys.append(alert.key)
-        let what = alert.window == .session ? "5-hour session" : "weekly limit"
-        var body = "\(Int(alert.left.rounded()))% of the \(what) left."
+        var body = "\(Int(alert.left.rounded()))% left on the \(alert.title) limit."
         var userInfo: [String: String] = [:]
         if let targetId = AutoSwitch.bestTarget(activeId: active.id, candidates: state.profiles, usage: usage, now: Date()),
            let target = state.profile(targetId) {
-            let targetLeft = Int(AutoSwitch.left(usage[targetId]?.session, Date()).rounded())
+            let targetLeft = Int((usage[targetId]?.tightestLeft(now: Date()) ?? 0).rounded())
             body += " \(target.label) has \(targetLeft)% left — click Switch to move to it."
             userInfo["targetId"] = targetId
         }

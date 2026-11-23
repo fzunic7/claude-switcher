@@ -9,7 +9,7 @@
   <img src="docs/images/usage-light.png" width="360" alt="The same panel in light mode">
 </p>
 
-- See **what's left** on every account: the 5-hour session and the weekly limit, with reset times.
+- See **what's left** on every account — exactly the limits your plan has (5-hour session, weekly, per-model weekly), with reset times.
 - **Switch** in one click. Your sessions stay on your Mac and keep working under the new account.
 - **Add accounts** by signing in on the Claude website — no passwords in the app.
 - Shows **extra usage** (spending beyond your plan) per account.
@@ -44,16 +44,16 @@ Open the panel — a **Get set up** checklist shows what's left and ticks itself
 
 | | |
 |---|---|
-| **Usage** — each account's session and weekly limits. Click **Switch** on the account you want. | <img src="docs/images/usage-dark.png" width="260"> |
+| **Usage** — each account's limits (Max shows weekly and per-model limits; Pro/Team also show the 5-hour session). Click **Switch** on the account you want. | <img src="docs/images/usage-dark.png" width="260"> |
 | **Costs** — extra usage this month against your limit. | <img src="docs/images/costs.png" width="260"> |
 | **Accounts** — add, rename, choose your main account, remove. | <img src="docs/images/accounts.png" width="260"> |
 | **Settings** (⚙) — light/dark, show remaining or used, low-usage notification, auto-switch, open at login. | <img src="docs/images/settings.png" width="260"> |
 
 **After switching:** restart any `claude` running in a terminal (it keeps the old account until restarted) and reload VS Code's window. Claude Desktop is closed and reopened for you.
 
-**Low-usage notification** (on by default, in Settings): when the active account's session or weekly limit drops to 10% left you get one notification for that limit. If another account has at least 20% left, the notification has a **Switch** button.
+**Low-usage notification** (on by default, in Settings): when any of the active account's limits drops to 10% left you get one notification for that limit. If another account has at least 20% left, the notification has a **Switch** button.
 
-**Auto-switch** (off by default, in Settings): when the active account's session or weekly limit drops to 5% left, the app switches to the account with the most left (at least 20%), at most once every 30 minutes, and sends a notification. It closes and reopens Claude Desktop like any switch.
+**Auto-switch** (off by default, in Settings): when any of the active account's limits drops to 5% left, the app switches to the account with the most room (at least 20% on every limit), at most once every 30 minutes, and sends a notification. It closes and reopens Claude Desktop like any switch.
 
 ## Good to know
 

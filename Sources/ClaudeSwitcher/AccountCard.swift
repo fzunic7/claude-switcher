@@ -142,10 +142,10 @@ struct AccountCard: View {
             if usage == nil {
                 Text("No usage data yet").font(.caption).foregroundStyle(.secondary)
             } else {
-                // No session window while other numbers are known: the 5-hour session hasn't started (0%).
-                UsageRow(title: "Session", window: usage?.session ?? UsageWindow(utilization: 0, resetsAt: nil),
-                         mode: model.menuBarMode)
-                UsageRow(title: "Weekly", window: usage?.weekly, mode: model.menuBarMode)
+                // Exactly the limits this plan has (e.g. Max: no 5-hour session, but per-model weekly limits).
+                ForEach(Array((usage?.displayLimits ?? []).enumerated()), id: \.offset) { _, limit in
+                    UsageRow(title: limit.title, window: limit.window, mode: model.menuBarMode)
+                }
                 HStack {
                     Image(systemName: "bolt.slash").font(.caption).foregroundStyle(.secondary)
                     Text("Extra usage").font(.callout)

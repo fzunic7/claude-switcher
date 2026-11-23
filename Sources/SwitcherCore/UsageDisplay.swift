@@ -5,17 +5,14 @@ public enum UsageDisplayMode: String, CaseIterable, Sendable {
 }
 
 public enum UsageDisplay {
-    /// Session (5-hour) % used. A missing window while other numbers are known means the session hasn't started: 0.
-    public static func sessionUsed(_ usage: AccountUsage?) -> Double? {
-        guard let usage else { return nil }
-        return usage.session?.utilization ?? 0
-    }
-
-    public static func menuBarTitle(label: String, usage: AccountUsage?, mode: UsageDisplayMode) -> String {
-        guard let used = sessionUsed(usage) else { return "\(label) –" }
+    /// Menu-bar text for the limit that matters most, e.g. "main 70% left" or "it 60% left · week".
+    public static func menuBarTitle(label: String, usage: AccountUsage?, mode: UsageDisplayMode, now: Date = Date()) -> String {
+        guard let limit = usage?.primaryLimit(now: now) else { return "\(label) –" }
+        let left = limit.left(now: now)
+        let suffix = limit.isWeekly ? " · week" : ""
         switch mode {
-        case .remaining: return "\(label) \(Int(max(0, 100 - used).rounded()))% left"
-        case .used: return "\(label) \(Int(used.rounded()))% used"
+        case .remaining: return "\(label) \(Int(left.rounded()))% left\(suffix)"
+        case .used: return "\(label) \(Int((100 - left).rounded()))% used\(suffix)"
         }
     }
 }

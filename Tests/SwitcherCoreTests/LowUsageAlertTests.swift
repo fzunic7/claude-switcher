@@ -14,7 +14,7 @@ import Testing
 
     @Test func firesAtTenPercentLeft() {
         let alert = LowUsageAlert.check(accountId: "A", usage: u(session: 90), now: now)
-        #expect(alert?.window == .session)
+        #expect(alert?.title == "Session")
         #expect(alert?.left == 10)
     }
 
@@ -23,7 +23,7 @@ import Testing
     }
 
     @Test func weeklyLimitAlsoAlerts() {
-        #expect(LowUsageAlert.check(accountId: "A", usage: u(session: 20, weekly: 93), now: now)?.window == .weekly)
+        #expect(LowUsageAlert.check(accountId: "A", usage: u(session: 20, weekly: 93), now: now)?.title == "Weekly")
     }
 
     @Test func staleNumbersDoNotAlert() {

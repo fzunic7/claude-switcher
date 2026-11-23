@@ -13,20 +13,17 @@ public enum AutoSwitch {
                               lastAutoSwitch: Date?, now: Date) -> String? {
         if let last = lastAutoSwitch, now.timeIntervalSince(last) < cooldown { return nil }
         guard let active = usage[activeId], now.timeIntervalSince(active.fetchedAt) <= maxAge else { return nil }
-        let nearlyOut = left(active.session, now) <= triggerLeft || left(active.weekly, now) <= triggerLeft
-        guard nearlyOut else { return nil }
-
+        guard active.tightestLeft(now: now) <= triggerLeft else { return nil }   // any limit nearly out
         return bestTarget(activeId: activeId, candidates: candidates, usage: usage, now: now)
     }
 
-    /// The other account with the most session left (at least `minimumTargetLeft`, weekly not exhausted).
+    /// The other account with the most room on its tightest limit (at least `minimumTargetLeft`).
     public static func bestTarget(activeId: String, candidates: [Profile], usage: [String: AccountUsage],
                                   now: Date) -> String? {
         let options = candidates.filter { $0.id != activeId }.compactMap { p -> (String, Double)? in
             guard let u = usage[p.id] else { return nil }
-            let session = left(u.session, now)
-            guard session >= minimumTargetLeft, left(u.weekly, now) > triggerLeft else { return nil }
-            return (p.id, session)
+            let room = u.tightestLeft(now: now)
+            return room >= minimumTargetLeft ? (p.id, room) : nil
         }
         return options.max { $0.1 < $1.1 }?.0
     }
