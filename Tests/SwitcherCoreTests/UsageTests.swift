@@ -13,6 +13,19 @@ final class FakeHTTP: HTTPClient, @unchecked Sendable {
         guard let r = responses[token] else { throw URLError(.notConnectedToInternet) }
         return (r.0, Data(r.1.utf8))
     }
+
+    var posts: [(url: URL, body: [String: Any])] = []
+    /// Renewal answers keyed by the refresh token sent.
+    var renewals: [String: (Int, String)] = [:]
+    var onPost: () -> Void = {}
+
+    func post(_ url: URL, headers: [String: String], body: Data) async throws -> (status: Int, body: Data) {
+        let json = (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]
+        posts.append((url, json))
+        onPost()
+        guard let r = renewals[json["refresh_token"] as? String ?? ""] else { throw URLError(.notConnectedToInternet) }
+        return (r.0, Data(r.1.utf8))
+    }
 }
 
 let fullUsageJSON = #"{"five_hour":{"utilization":42,"resets_at":"2026-11-21T15:10:00Z"},"seven_day":{"utilization":23,"resets_at":"2026-11-24T10:00:00.123+00:00"},"extra_usage":{"is_enabled":true,"monthly_limit":5000,"used_credits":1240,"utilization":24.8,"currency":"EUR","decimal_places":2,"spend_limit_reached":false},"unknown_thing":{"x":1}}"#

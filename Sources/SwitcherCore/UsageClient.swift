@@ -2,6 +2,7 @@ import Foundation
 
 public protocol HTTPClient: Sendable {
     func get(_ url: URL, headers: [String: String]) async throws -> (status: Int, body: Data)
+    func post(_ url: URL, headers: [String: String], body: Data) async throws -> (status: Int, body: Data)
 }
 
 public struct URLSessionHTTPClient: HTTPClient {
@@ -9,6 +10,15 @@ public struct URLSessionHTTPClient: HTTPClient {
 
     public func get(_ url: URL, headers: [String: String]) async throws -> (status: Int, body: Data) {
         var request = URLRequest(url: url, timeoutInterval: 15)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
+    }
+
+    public func post(_ url: URL, headers: [String: String], body: Data) async throws -> (status: Int, body: Data) {
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.httpBody = body
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         let (data, response) = try await URLSession.shared.data(for: request)
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
@@ -23,7 +33,7 @@ public enum UsageError: Error, Equatable {
 /// Calls the (undocumented) endpoint Claude Code uses for `/usage`. Read-only; never refreshes tokens.
 public struct UsageClient: Sendable {
     public static let url = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    let http: HTTPClient
+    public let http: HTTPClient
 
     public init(http: HTTPClient = URLSessionHTTPClient()) { self.http = http }
 

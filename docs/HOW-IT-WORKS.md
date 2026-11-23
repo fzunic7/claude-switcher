@@ -34,7 +34,7 @@ If any step fails, everything is put back as it was and you're told which step f
 
 ## Usage numbers
 
-From `https://api.anthropic.com/api/oauth/usage` (what Claude Code's `/usage` uses), with each account's own saved sign-in. Sign-ins aren't refreshed by the app — that's Claude Code's job — so an account you haven't used for a few hours shows its last known numbers. Claude Code's own cache in `~/.claude.json` is the fallback for the active account.
+From `https://api.anthropic.com/api/oauth/usage` (what Claude Code's `/usage` uses), with each account's own sign-in. Access tokens last about 8 hours and Claude Code renews them only while the CLI runs, so the app renews expired ones itself, exactly as Claude Code does (`https://platform.claude.com/v1/oauth/token`, refresh grant), and writes the result back: into Claude Code's own Keychain item for the active account, into the saved copy for the others. If Claude Code renewed the same login at the same moment, its copy wins. After a "too many requests" answer the app leaves that account alone for 15 minutes; it checks every 15 minutes otherwise.
 
 ## Sessions
 

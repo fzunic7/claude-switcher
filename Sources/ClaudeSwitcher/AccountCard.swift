@@ -54,9 +54,11 @@ struct UsageRow: View {
                 Text(resetText).font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
-                let used = window?.utilization ?? 0
+                // Numbers from before a reset no longer mean anything.
+                let resetPassed = window?.resetsAt.map { $0 <= Date() } ?? false
+                let used = resetPassed ? 0 : (window?.utilization ?? 0)
                 UsageBar(fraction: mode == .remaining ? max(0, 100 - used) / 100 : used / 100, usedPercent: used)
-                Text(window.map { mode == .remaining ? "\(Int(max(0, 100 - $0.utilization).rounded()))% left" : "\(Int($0.utilization.rounded()))%" } ?? "–")
+                Text(resetPassed ? "–" : window.map { mode == .remaining ? "\(Int(max(0, 100 - $0.utilization).rounded()))% left" : "\(Int($0.utilization.rounded()))%" } ?? "–")
                     .font(.callout.monospacedDigit().bold())
                     .foregroundStyle(window.map { UsageBar.color($0.utilization) } ?? .secondary)
                     .frame(width: 76, alignment: .trailing)
@@ -68,7 +70,7 @@ struct UsageRow: View {
         guard let window else { return "" }
         guard let date = window.resetsAt else { return window.utilization == 0 ? "Not started" : "" }
         let seconds = date.timeIntervalSinceNow
-        if seconds <= 0 { return "Resetting" }
+        if seconds <= 0 { return "Reset since last check" }
         if seconds < 24 * 3600 {
             let h = Int(seconds) / 3600, m = (Int(seconds) % 3600) / 60
             return h > 0 ? "Resets in \(h) hr \(m) min" : "Resets in \(m) min"

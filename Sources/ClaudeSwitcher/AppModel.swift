@@ -151,7 +151,7 @@ final class AppModel: ObservableObject {
         if isAdding || Date().timeIntervalSince(lastAccountCheck) >= 30 { await checkAccounts() }
         // A finished sign-in that added nothing (e.g. the same account again) ends the wait.
         if loginJustEnded, isAdding, !signInStalled { cancelAdd() }
-        if Date().timeIntervalSince(lastUsageRefresh) >= 300 { await refreshUsage(force: true) }
+        if Date().timeIntervalSince(lastUsageRefresh) >= 900 { await refreshUsage(force: true) }
     }
 
     func panelOpened() {
@@ -328,7 +328,7 @@ final class AppModel: ObservableObject {
     // MARK: Usage
 
     func refreshUsage(force: Bool) async {
-        guard force || Date().timeIntervalSince(lastUsageRefresh) >= 60, !isRefreshing else { return }
+        guard force || Date().timeIntervalSince(lastUsageRefresh) >= 120, !isRefreshing else { return }
         isRefreshing = true
         lastUsageRefresh = Date()
         usage = await usageService.refresh()
