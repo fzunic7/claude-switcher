@@ -76,6 +76,8 @@ final class AppModel: ObservableObject {
     private var lastAccountCheck = Date.distantPast
     private var lastUsageRefresh = Date.distantPast
     private var loginProcess: Process?
+    private var pendingSignIn: IsolatedSignIn?
+    private var collecting = false
     private var addStartedAt: Date?
     private var checkInFlight = false
 
@@ -141,16 +143,8 @@ final class AppModel: ObservableObject {
 
     private func tick() async {
         if let started = addStartedAt, Date().timeIntervalSince(started) > 300 { cancelAdd() }
-        var loginJustEnded = false
-        if isAdding, let p = loginProcess, !p.isRunning {
-            loginProcess = nil
-            watcher.signInInProgress = false
-            loginJustEnded = true
-            if p.terminationStatus != 0 { signInStalled = true }
-        }
-        if isAdding || Date().timeIntervalSince(lastAccountCheck) >= 30 { await checkAccounts() }
-        // A finished sign-in that added nothing (e.g. the same account again) ends the wait.
-        if loginJustEnded, isAdding, !signInStalled { cancelAdd() }
+        if isAdding { await collectSignIn() }
+        if Date().timeIntervalSince(lastAccountCheck) >= 30 { await checkAccounts() }
         if Date().timeIntervalSince(lastUsageRefresh) >= 900 { await refreshUsage(force: true) }
     }
 
@@ -188,55 +182,84 @@ final class AppModel: ObservableObject {
         } catch {
             statusMessage = "Couldn't check accounts: \(describe(error))"
         }
-        if isAdding && !watcher.isAdding { finishAdd() }
     }
 
+    /// Adds an account without touching the current one: Claude Code signs in inside a private config folder,
+    /// and the result is saved as a new (inactive) account. Nothing running is disturbed.
     func addAccount() {
         guard !isAdding, !isBusy else { return }
         isAdding = true
         signInStalled = false
         tab = .accounts
-        let watcher = self.watcher
+        let env = self.env
         Task {
             do {
-                // Saving the current login and finding `claude` run subprocesses: keep them off the main thread.
-                let process: Process? = try await Task.detached {
-                    try watcher.beginAdd()
-                    if let p = try? LoginLauncher.startLogin() { return p }
-                    try LoginLauncher.openInTerminal()
-                    return nil
+                let folder = SwitcherEnvironment.switcherRoot.appendingPathComponent("adding/\(UUID().uuidString)")
+                let (signIn, process) = try await Task.detached { () throws -> (IsolatedSignIn, Process?) in
+                    let signIn = try IsolatedSignIn(folder: folder, secrets: env.secrets, lister: SecurityKeychainLister())
+                    if let p = try? LoginLauncher.startLogin(environment: signIn.environment) { return (signIn, p) }
+                    try LoginLauncher.openInTerminal(configDir: folder.path)
+                    return (signIn, nil)
                 }.value
+                pendingSignIn = signIn
                 loginProcess = process
-                watcher.signInInProgress = process != nil
                 addStartedAt = Date()
             } catch {
-                watcher.cancelAdd()
                 isAdding = false
                 showError(error)
             }
         }
     }
 
-    func signInInTerminal() {
-        if let p = loginProcess, p.isRunning { p.terminate() }
-        loginProcess = nil
-        watcher.signInInProgress = false
-        signInStalled = false
-        addStartedAt = Date()
-        do { try LoginLauncher.openInTerminal() } catch { showError(error) }
+    /// Picks up a finished sign-in (checked every 2 seconds while adding).
+    private func collectSignIn() async {
+        guard let signIn = pendingSignIn, !collecting else { return }
+        if let p = loginProcess {
+            if p.isRunning { return }                       // wait until Claude Code has written everything
+            loginProcess = nil
+            if p.terminationStatus != 0 { signInStalled = true; return }
+        }
+        collecting = true
+        defer { collecting = false }
+        let switcher = self.switcher
+        do {
+            let added: Profile? = try await Task.detached {
+                guard let login = try signIn.collect() else { return nil }
+                return try switcher.addProfile(account: login.account, login: login.secret)
+            }.value
+            guard let added else { return }
+            let current = active?.label ?? "your current account"
+            notify(title: "Added \(added.email)", body: "You're still on \(current); nothing was switched.")
+            finishAdd()
+            reload()
+            await refreshUsage(force: true)
+        } catch {
+            finishAdd()
+            signIn.discard()
+            showError(error)
+        }
     }
 
-    /// Stops waiting; if the sign-in removed or replaced your login, the previous account is put back.
+    func signInInTerminal() {
+        guard let signIn = pendingSignIn else { return }
+        if let p = loginProcess, p.isRunning { p.terminate() }
+        loginProcess = nil
+        signInStalled = false
+        addStartedAt = Date()
+        do { try LoginLauncher.openInTerminal(configDir: signIn.folder.path) } catch { showError(error) }
+    }
+
+    /// Stops waiting and removes anything the unfinished sign-in left behind. Your current login was never touched.
     func cancelAdd() {
         if let p = loginProcess, p.isRunning { p.terminate() }
-        watcher.signInInProgress = false
-        do { try watcher.abandonAdd() } catch { showError(error) }
+        pendingSignIn?.discard()
         finishAdd()
         reload()
     }
 
     private func finishAdd() {
         loginProcess = nil
+        pendingSignIn = nil
         addStartedAt = nil
         isAdding = false
         signInStalled = false

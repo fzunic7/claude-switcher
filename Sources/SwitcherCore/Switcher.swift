@@ -182,6 +182,28 @@ public final class Switcher: @unchecked Sendable {
         }
     }
 
+    /// Saves an account signed in separately (see `IsolatedSignIn`). The live login and the active account are untouched.
+    public func addProfile(account: [String: JSONValue], login: Data) throws -> Profile {
+        guard let id = account["accountUuid"]?.stringValue, !id.isEmpty else { throw SwitchError.noLiveLogin }
+        var state = try env.store.load()
+        try saveVault(id, account: SecurityCLIStore.ownAccount, secret: login)
+        let profile: Profile
+        if let i = state.profiles.firstIndex(where: { $0.id == id }) {
+            state.profiles[i].oauthAccount = account
+            profile = state.profiles[i]
+        } else {
+            let email = account["emailAddress"]?.stringValue ?? id
+            profile = Profile(id: id, label: email.split(separator: "@").first.map(String.init) ?? email,
+                              role: state.profiles.isEmpty ? .main : .backup,
+                              orgUuid: account["organizationUuid"]?.stringValue ?? "", email: email,
+                              oauthAccount: account, hasDesktopSnapshot: false)
+            state.profiles.append(profile)
+        }
+        if state.ignoredAccountId == id { state.ignoredAccountId = nil }
+        try env.store.save(state)
+        return profile
+    }
+
     /// Points the Claude Code login (CLI and VS Code) at a saved account. Desktop and sessions are untouched.
     public func switchCLI(to id: String) throws {
         var state = try env.store.load()

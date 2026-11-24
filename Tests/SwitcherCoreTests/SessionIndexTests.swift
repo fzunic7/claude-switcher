@@ -87,6 +87,7 @@ import Testing
         let b = root.appendingPathComponent("B/P")
         try fm.createDirectory(at: b, withIntermediateDirectories: true)
         try record("still-in-b", 10).write(to: b.appendingPathComponent("local_4.json"))
+        try marker(root.appendingPathComponent("A/O"), "4")            // the marker Claude Desktop really writes
         let result = try index.merge(("A", "O"), ("B", "P"))
         #expect(!result.toA.contains("local_4"))
         #expect(!fm.fileExists(atPath: root.appendingPathComponent("A/O/local_4.json").path))
@@ -100,5 +101,43 @@ import Testing
         let result = try index.merge(("A", "O"), ("B", "P"))
         #expect(result.toB.contains("local_2"))
         #expect(try Data(contentsOf: b.appendingPathComponent("local_2.json")) == Data(contentsOf: root.appendingPathComponent("A/O/local_2.json")))
+    }
+
+    // Claude Desktop deletes a session by removing local_<uuid>.json and writing a marker file deleted_<uuid>.
+    func marker(_ dir: URL, _ uuid: String) throws { try Data("1795000000000".utf8).write(to: dir.appendingPathComponent("deleted_\(uuid)")) }
+
+    @Test func deletionCarriesOverToTheOtherAccount() throws {
+        let root = try makeTempDir()
+        let a = root.appendingPathComponent("A/O"), b = root.appendingPathComponent("B/P")
+        try fm.createDirectory(at: a, withIntermediateDirectories: true)
+        try fm.createDirectory(at: b, withIntermediateDirectories: true)
+        try marker(a, "u1")                                              // deleted under A
+        try record("t", 10).write(to: b.appendingPathComponent("local_u1.json"))   // still under B
+        let trash = root.appendingPathComponent("trash")
+        _ = try SessionIndex(sessionsRoot: root, trashRoot: trash).merge(("A", "O"), ("B", "P"))
+        #expect(!fm.fileExists(atPath: b.appendingPathComponent("local_u1.json").path))
+        #expect(fm.fileExists(atPath: b.appendingPathComponent("deleted_u1").path))
+        #expect(!fm.fileExists(atPath: a.appendingPathComponent("local_u1.json").path))
+        #expect(try fm.contentsOfDirectory(atPath: trash.path).contains { $0.contains("local_u1") })
+    }
+
+    @Test func recordBroughtBackNextToItsMarkerIsCleanedUp() throws {
+        let root = try makeTempDir()
+        let a = root.appendingPathComponent("A/O")
+        try fm.createDirectory(at: a, withIntermediateDirectories: true)
+        try marker(a, "u2")
+        try record("t", 10).write(to: a.appendingPathComponent("local_u2.json"))
+        _ = try SessionIndex(sessionsRoot: root, trashRoot: root.appendingPathComponent("trash")).merge(("A", "O"), ("B", "P"))
+        #expect(!fm.fileExists(atPath: a.appendingPathComponent("local_u2.json").path))
+        #expect(!fm.fileExists(atPath: root.appendingPathComponent("B/P/local_u2.json").path))
+    }
+
+    @Test func listHidesDeletedSessions() throws {
+        let root = try makeTempDir()
+        let a = root.appendingPathComponent("A/O")
+        try fm.createDirectory(at: a, withIntermediateDirectories: true)
+        try record("gone", 10).write(to: a.appendingPathComponent("local_u3.json"))
+        try marker(a, "u3")
+        #expect(try SessionIndex(sessionsRoot: root).list(account: "A", org: "O").isEmpty)
     }
 }

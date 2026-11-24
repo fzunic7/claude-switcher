@@ -41,7 +41,8 @@ public extension SwitcherEnvironment {
             secrets: SecurityCLIStore.live(),
             claudeJSON: ClaudeJSON(url: home.appendingPathComponent(".claude.json")),
             desktopLogin: DesktopLoginFiles(supportRoot: desktopSupportRoot, vaultRoot: switcherRoot.appendingPathComponent("vault")),
-            sessions: SessionIndex(sessionsRoot: desktopSupportRoot.appendingPathComponent("claude-code-sessions")),
+            sessions: SessionIndex(sessionsRoot: desktopSupportRoot.appendingPathComponent("claude-code-sessions"),
+                                   trashRoot: switcherRoot.appendingPathComponent("removed-sessions")),
             desktop: desktop,
             desktopAccount: DesktopConfigReader(configURL: desktopSupportRoot.appendingPathComponent("config.json")),
             identity: ClaudeAuthStatus())

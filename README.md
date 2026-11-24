@@ -36,7 +36,7 @@ Open the panel — a **Get set up** checklist shows what's left and ticks itself
 
 1. **Install Claude Code** if you haven't.
 2. **Add your main account** — click **Add account** and sign in on the Claude website.
-3. **Add your backup account** — first switch claude.ai in your browser to the other account (or use a private window), then **Add account** again. You stay on your main account.
+3. **Add your backup account** — first switch claude.ai in your browser to the other account (or use a private window), then **Add account** again. Adding never touches the account you're signed in to: open terminals, VS Code and Claude Desktop keep working.
 4. **Claude Desktop** — sign in to Desktop once as each account (log out and back in as the other one when you're on it). The app remembers Desktop's login from then on.
 5. **VS Code** — nothing to do. It uses Claude Code's login; reload the VS Code window after a switch.
 
@@ -57,7 +57,7 @@ Open the panel — a **Get set up** checklist shows what's left and ticks itself
 
 ## Good to know
 
-- **Your sessions are never lost.** Terminal and VS Code sessions are files on your Mac that work under any account (`claude --resume`). Claude Desktop's session list is kept in sync between accounts on every switch. Nothing is uploaded.
+- **Your sessions are never lost.** Terminal and VS Code sessions are files on your Mac that work under any account (`claude --resume`). Claude Desktop's session list is kept in sync between accounts on every switch — including deletions: a session you delete under one account is gone under the other too. Nothing is uploaded.
 - **Regular Claude chats** (claude.ai conversations) belong to each account and can't move between them.
 - **One account at a time.** Switching quits Claude Desktop, which interrupts anything running in it.
 - **Usage numbers** come from the same place Claude Code's `/usage` does. The active account is live; others are live while their saved sign-in is valid (a few hours after you last used them), otherwise the last known numbers are shown with "as of …".

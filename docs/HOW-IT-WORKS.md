@@ -14,10 +14,9 @@ Each saved account has:
 
 ## Adding an account
 
-1. The app saves your current sign-in (it's about to be replaced).
-2. It runs `claude auth login`, which opens the Claude website.
-3. When the sign-in finishes and `claude auth status` reports a new account, it's saved.
-4. Claude Code is put back on the account you were using.
+1. The app runs Claude Code's own sign-in (`claude auth login`) with a private, temporary config folder (`CLAUDE_CONFIG_DIR`). Claude Code keeps logins per config folder, so this sign-in lands in its own Keychain entry and account file — **the login your terminals, VS Code and Claude Desktop use is never touched**.
+2. The browser opens; you sign in.
+3. The app reads the new account from that folder and its login from the new Keychain entry, saves them as an account, and deletes the temporary folder and entry.
 
 Accounts you sign in to any other way (`/login`, `claude auth login`) are picked up within 30 seconds.
 
@@ -27,7 +26,7 @@ Accounts you sign in to any other way (`/login`, `claude auth login`) are picked
 2. Quit Claude Desktop and save its sign-in under the account it's signed in to (`lastKnownAccountUuid` in Desktop's `config.json`).
 3. Put the target account's Claude Code sign-in into the Keychain and its details into `~/.claude.json`.
 4. Put the target account's Desktop sign-in in place, if one was saved.
-5. Merge Claude Desktop's per-account session lists both ways (never deleting; a newer copy replaces an older one; sessions you deleted stay deleted).
+5. Sync Claude Desktop's per-account session lists both ways. Desktop deletes a session by removing its `local_<id>.json` record and writing a `deleted_<id>` marker; a deletion on one side is carried to the other (the record is moved to `~/Library/Application Support/ClaudeSwitcher/removed-sessions/`, not erased). Every remaining session is copied to the side that lacks it, and a newer copy replaces an older one.
 6. Reopen Claude Desktop.
 
 If any step fails, everything is put back as it was and you're told which step failed.
